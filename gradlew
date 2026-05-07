@@ -1,5 +1,5 @@
-```bash id="psvhfi"
-#!/usr/bin/env sh
+```bash id="kdr1v7"
+#!/bin/sh
 
 DIR="$(cd "$(dirname "$0")"; pwd)"
 
