@@ -1,8 +1,7 @@
-```bash id="gradle wrapper"
 #!/bin/sh
+# Gradle wrapper launcher
 
-DIR="$(cd "$(dirname "$0")"; pwd)"
+DIR="$(cd "$(dirname "$0")" && pwd)"
 
-java -classpath "$DIR/gradle/wrapper/gradle-wrapper.jar" \
+exec "$DIR/gradle/wrapper/gradle-wrapper.jar" \
 org.gradle.wrapper.GradleWrapperMain "$@"
-```
