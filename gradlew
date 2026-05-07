@@ -1,4 +1,4 @@
-```bash id="kdr1v7"
+```bash id="gradle wrapper"
 #!/bin/sh
 
 DIR="$(cd "$(dirname "$0")"; pwd)"
