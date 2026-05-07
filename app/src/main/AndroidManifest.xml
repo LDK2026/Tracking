@@ -1,34 +1,13 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<application
+    ... >
 
-    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
-    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
-    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION"/>
+    <activity
+        android:name=".MapsActivity"
+        android:exported="true">
+        <intent-filter>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent-filter>
+    </activity>
 
-    <application
-        android:theme="@style/Theme.AppCompat.Light.NoActionBar">
-
-        <meta-data
-            android:name="com.google.android.geo.API_KEY"
-            android:value="TAVO_API_KEY"/>
-
-        ```xml id="f4pmxv"
-<activity
-    android:name=".MapsActivity"
-    android:exported="true">
-
-    <intent-filter>
-        <action android:name="android.intent.action.MAIN" />
-        <category android:name="android.intent.category.LAUNCHER" />
-    </intent-filter>
-
-</activity>
-```
-
-
-        <service
-            android:name=".LocationService"
-            android:foregroundServiceType="location"
-            android:exported="false"/>
-    </application>
-
-</manifest>
+</application>
