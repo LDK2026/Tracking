@@ -10,9 +10,6 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
-    env:
-      MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY || 'TAVO_API_KEY' }}
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -27,8 +24,7 @@ jobs:
         uses: android-actions/setup-android@v3
 
       - name: Install Android SDK packages
-        run: |
-          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -40,7 +36,7 @@ jobs:
         run: |
           rm -rf app
           mkdir -p app/src/main/java/com/example/tracker
-          mkdir -p app/src/main/res/layout
+          mkdir -p app/src/main/assets
           mkdir -p app/src/main/res/values
 
           cat > settings.gradle <<'EOF'
@@ -67,14 +63,12 @@ jobs:
           cat > build.gradle <<'EOF'
           plugins {
               id "com.android.application" version "8.7.3" apply false
-              id "org.jetbrains.kotlin.android" version "2.0.21" apply false
           }
           EOF
 
           cat > app/build.gradle <<'EOF'
           plugins {
               id "com.android.application"
-              id "org.jetbrains.kotlin.android"
           }
 
           android {
@@ -85,32 +79,21 @@ jobs:
                   applicationId "com.example.tracker"
                   minSdk 24
                   targetSdk 35
-                  versionCode 1
-                  versionName "1.0"
+                  versionCode 2
+                  versionName "1.1"
               }
 
               compileOptions {
                   sourceCompatibility JavaVersion.VERSION_17
                   targetCompatibility JavaVersion.VERSION_17
               }
-
-              kotlinOptions {
-                  jvmTarget = "17"
-              }
-          }
-
-          dependencies {
-              implementation "androidx.core:core-ktx:1.15.0"
-              implementation "androidx.appcompat:appcompat:1.7.0"
-              implementation "com.google.android.gms:play-services-maps:19.0.0"
-              implementation "com.google.android.gms:play-services-location:21.3.0"
           }
           EOF
 
           cat > app/src/main/res/values/styles.xml <<'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <resources>
-              <style name="Theme.Tracker" parent="Theme.AppCompat.Light.NoActionBar">
+              <style name="AppTheme" parent="android:style/Theme.Material.Light.NoActionBar">
                   <item name="android:fontFamily">sans</item>
                   <item name="android:colorAccent">#0f766e</item>
                   <item name="android:windowLightStatusBar">true</item>
@@ -119,21 +102,7 @@ jobs:
           </resources>
           EOF
 
-          cat > app/src/main/res/layout/activity_maps.xml <<'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
-              android:layout_width="match_parent"
-              android:layout_height="match_parent">
-
-              <fragment
-                  android:id="@+id/map"
-                  android:name="com.google.android.gms.maps.SupportMapFragment"
-                  android:layout_width="match_parent"
-                  android:layout_height="match_parent" />
-          </FrameLayout>
-          EOF
-
-          cat > app/src/main/AndroidManifest.xml <<EOF
+          cat > app/src/main/AndroidManifest.xml <<'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
@@ -143,18 +112,16 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
               <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+              <uses-permission android:name="android.permission.INTERNET" />
 
               <application
                   android:allowBackup="true"
                   android:label="Tracker"
-                  android:theme="@style/Theme.Tracker">
-
-                  <meta-data
-                      android:name="com.google.android.geo.API_KEY"
-                      android:value="${MAPS_API_KEY}" />
+                  android:supportsRtl="true"
+                  android:theme="@style/AppTheme">
 
                   <activity
-                      android:name=".MapsActivity"
+                      android:name=".MainActivity"
                       android:exported="true">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -170,211 +137,370 @@ jobs:
           </manifest>
           EOF
 
-          cat > app/src/main/java/com/example/tracker/MapsActivity.kt <<'EOF'
-          package com.example.tracker
-
-          import android.Manifest
-          import android.content.BroadcastReceiver
-          import android.content.Context
-          import android.content.Intent
-          import android.content.IntentFilter
-          import android.content.pm.PackageManager
-          import android.os.Bundle
-          import androidx.appcompat.app.AppCompatActivity
-          import androidx.core.app.ActivityCompat
-          import androidx.core.content.ContextCompat
-          import com.google.android.gms.maps.CameraUpdateFactory
-          import com.google.android.gms.maps.GoogleMap
-          import com.google.android.gms.maps.OnMapReadyCallback
-          import com.google.android.gms.maps.SupportMapFragment
-          import com.google.android.gms.maps.model.LatLng
-          import com.google.android.gms.maps.model.Polyline
-          import com.google.android.gms.maps.model.PolylineOptions
-
-          class MapsActivity : AppCompatActivity(), OnMapReadyCallback {
-              private var map: GoogleMap? = null
-              private var polyline: Polyline? = null
-              private val permissionCode = 10
-
-              private val receiver = object : BroadcastReceiver() {
-                  override fun onReceive(context: Context?, intent: Intent?) {
-                      val googleMap = map ?: return
-                      val lat = intent?.getDoubleExtra("lat", 0.0) ?: return
-                      val lng = intent.getDoubleExtra("lng", 0.0)
-                      val point = LatLng(lat, lng)
-                      addPoint(googleMap, point)
-                      googleMap.animateCamera(CameraUpdateFactory.newLatLngZoom(point, 17f))
+          cat > app/src/main/assets/map.html <<'EOF'
+          <!doctype html>
+          <html>
+          <head>
+              <meta charset="utf-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1">
+              <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+              <style>
+                  html, body, #map { height: 100%; margin: 0; }
+                  body { font-family: system-ui, sans-serif; }
+                  #empty {
+                      align-items: center;
+                      background: #f8fafc;
+                      color: #334155;
+                      display: flex;
+                      inset: 0;
+                      justify-content: center;
+                      padding: 24px;
+                      position: absolute;
+                      text-align: center;
+                      z-index: 500;
                   }
-              }
+              </style>
+          </head>
+          <body>
+          <div id="map"></div>
+          <div id="empty">Laukiama GPS vietos...</div>
+          <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+          <script>
+              const map = L.map("map").setView([54.6872, 25.2797], 12);
+              L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+                  maxZoom: 19,
+                  attribution: "OpenStreetMap"
+              }).addTo(map);
 
-              override fun onCreate(savedInstanceState: Bundle?) {
-                  super.onCreate(savedInstanceState)
-                  setContentView(R.layout.activity_maps)
+              const points = [];
+              const line = L.polyline([], { color: "#0f766e", weight: 5 }).addTo(map);
+              const marker = L.circleMarker([54.6872, 25.2797], {
+                  radius: 8,
+                  color: "#ffffff",
+                  weight: 3,
+                  fillColor: "#dc2626",
+                  fillOpacity: 1
+              });
 
-                  val mapFragment = supportFragmentManager.findFragmentById(R.id.map) as SupportMapFragment
-                  mapFragment.getMapAsync(this)
-
-                  ContextCompat.registerReceiver(
-                      this,
-                      receiver,
-                      IntentFilter(LocationService.ACTION_LOCATION_UPDATE),
-                      ContextCompat.RECEIVER_NOT_EXPORTED
-                  )
-
-                  requestLocationPermissionIfNeeded()
-              }
-
-              override fun onMapReady(googleMap: GoogleMap) {
-                  map = googleMap
-                  if (hasLocationPermission()) {
-                      googleMap.isMyLocationEnabled = true
-                      startLocationService()
-                  }
-              }
-
-              override fun onRequestPermissionsResult(
-                  requestCode: Int,
-                  permissions: Array<out String>,
-                  grantResults: IntArray
-              ) {
-                  super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-                  if (requestCode == permissionCode && hasLocationPermission()) {
-                      map?.isMyLocationEnabled = true
-                      startLocationService()
-                  }
-              }
-
-              override fun onDestroy() {
-                  unregisterReceiver(receiver)
-                  super.onDestroy()
-              }
-
-              private fun addPoint(googleMap: GoogleMap, point: LatLng) {
-                  val current = polyline
-                  if (current == null) {
-                      polyline = googleMap.addPolyline(PolylineOptions().add(point).width(10f))
+              window.addLocation = function(lat, lng, accuracy) {
+                  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+                  document.getElementById("empty").style.display = "none";
+                  const point = [lat, lng];
+                  points.push(point);
+                  line.setLatLngs(points);
+                  marker.setLatLng(point).addTo(map);
+                  if (points.length === 1) {
+                      map.setView(point, 16);
                   } else {
-                      val points = current.points
-                      points.add(point)
-                      current.points = points
+                      map.fitBounds(line.getBounds(), { padding: [32, 32], maxZoom: 17 });
+                  }
+              };
+          </script>
+          </body>
+          </html>
+          EOF
+
+          cat > app/src/main/java/com/example/tracker/MainActivity.java <<'EOF'
+          package com.example.tracker;
+
+          import android.Manifest;
+          import android.app.Activity;
+          import android.content.BroadcastReceiver;
+          import android.content.Context;
+          import android.content.Intent;
+          import android.content.IntentFilter;
+          import android.content.pm.PackageManager;
+          import android.os.Build;
+          import android.os.Bundle;
+          import android.webkit.WebSettings;
+          import android.webkit.WebView;
+          import android.webkit.WebViewClient;
+          import android.widget.Button;
+          import android.widget.LinearLayout;
+          import android.widget.TextView;
+
+          import java.util.Locale;
+
+          public class MainActivity extends Activity {
+              private static final int REQUEST_PERMISSIONS = 100;
+              private WebView webView;
+              private TextView status;
+              private boolean mapReady;
+
+              private final BroadcastReceiver receiver = new BroadcastReceiver() {
+                  @Override
+                  public void onReceive(Context context, Intent intent) {
+                      double lat = intent.getDoubleExtra(LocationService.EXTRA_LAT, Double.NaN);
+                      double lng = intent.getDoubleExtra(LocationService.EXTRA_LNG, Double.NaN);
+                      float accuracy = intent.getFloatExtra(LocationService.EXTRA_ACCURACY, 0f);
+                      showLocation(lat, lng, accuracy);
+                  }
+              };
+
+              @Override
+              protected void onCreate(Bundle savedInstanceState) {
+                  super.onCreate(savedInstanceState);
+                  buildUi();
+                  setupMap();
+                  requestNeededPermissions();
+              }
+
+              @Override
+              protected void onStart() {
+                  super.onStart();
+                  IntentFilter filter = new IntentFilter(LocationService.ACTION_LOCATION);
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                      registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED);
+                  } else {
+                      registerReceiver(receiver, filter);
                   }
               }
 
-              private fun startLocationService() {
-                  ContextCompat.startForegroundService(this, Intent(this, LocationService::class.java))
+              @Override
+              protected void onStop() {
+                  unregisterReceiver(receiver);
+                  super.onStop();
               }
 
-              private fun requestLocationPermissionIfNeeded() {
-                  if (!hasLocationPermission()) {
-                      ActivityCompat.requestPermissions(
-                          this,
-                          arrayOf(Manifest.permission.ACCESS_FINE_LOCATION),
-                          permissionCode
-                      )
+              @Override
+              public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+                  super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+                  if (requestCode == REQUEST_PERMISSIONS && hasLocationPermission()) {
+                      startTracking();
+                  } else {
+                      status.setText("Suteikite vietos leidima, kad programa galetu sekti marsruta.");
                   }
               }
 
-              private fun hasLocationPermission(): Boolean {
-                  return ContextCompat.checkSelfPermission(
-                      this,
-                      Manifest.permission.ACCESS_FINE_LOCATION
-                  ) == PackageManager.PERMISSION_GRANTED
+              private void buildUi() {
+                  LinearLayout root = new LinearLayout(this);
+                  root.setOrientation(LinearLayout.VERTICAL);
+
+                  status = new TextView(this);
+                  status.setText("Tracker parengtas. Laukiama leidimu...");
+                  status.setTextSize(15);
+                  status.setPadding(16, 16, 16, 8);
+                  root.addView(status, new LinearLayout.LayoutParams(
+                          LinearLayout.LayoutParams.MATCH_PARENT,
+                          LinearLayout.LayoutParams.WRAP_CONTENT
+                  ));
+
+                  Button start = new Button(this);
+                  start.setText("Pradeti sekima");
+                  start.setOnClickListener(v -> {
+                      if (hasLocationPermission()) {
+                          startTracking();
+                      } else {
+                          requestNeededPermissions();
+                      }
+                  });
+                  root.addView(start, new LinearLayout.LayoutParams(
+                          LinearLayout.LayoutParams.MATCH_PARENT,
+                          LinearLayout.LayoutParams.WRAP_CONTENT
+                  ));
+
+                  webView = new WebView(this);
+                  root.addView(webView, new LinearLayout.LayoutParams(
+                          LinearLayout.LayoutParams.MATCH_PARENT,
+                          0,
+                          1
+                  ));
+
+                  setContentView(root);
+              }
+
+              private void setupMap() {
+                  WebSettings settings = webView.getSettings();
+                  settings.setJavaScriptEnabled(true);
+                  settings.setDomStorageEnabled(true);
+                  settings.setMixedContentMode(WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
+                  webView.setWebViewClient(new WebViewClient() {
+                      @Override
+                      public void onPageFinished(WebView view, String url) {
+                          mapReady = true;
+                      }
+                  });
+                  webView.loadUrl("file:///android_asset/map.html");
+              }
+
+              private void requestNeededPermissions() {
+                  if (hasLocationPermission()) {
+                      startTracking();
+                      return;
+                  }
+
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                      requestPermissions(new String[] {
+                              Manifest.permission.ACCESS_FINE_LOCATION,
+                              Manifest.permission.ACCESS_COARSE_LOCATION,
+                              Manifest.permission.POST_NOTIFICATIONS
+                      }, REQUEST_PERMISSIONS);
+                  } else {
+                      requestPermissions(new String[] {
+                              Manifest.permission.ACCESS_FINE_LOCATION,
+                              Manifest.permission.ACCESS_COARSE_LOCATION
+                      }, REQUEST_PERMISSIONS);
+                  }
+              }
+
+              private boolean hasLocationPermission() {
+                  return checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+                          || checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED;
+              }
+
+              private void startTracking() {
+                  try {
+                      Intent intent = new Intent(this, LocationService.class);
+                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                          startForegroundService(intent);
+                      } else {
+                          startService(intent);
+                      }
+                      status.setText("Sekimas ijungtas. Judekite, kad zemelapyje atsirastu marsrutas.");
+                  } catch (Exception error) {
+                      status.setText("Nepavyko paleisti sekimo: " + error.getClass().getSimpleName());
+                  }
+              }
+
+              private void showLocation(double lat, double lng, float accuracy) {
+                  status.setText(String.format(Locale.US, "Vieta: %.6f, %.6f | tikslumas apie %.0f m", lat, lng, accuracy));
+                  if (mapReady) {
+                      String js = String.format(Locale.US, "window.addLocation(%f,%f,%f)", lat, lng, accuracy);
+                      webView.evaluateJavascript(js, null);
+                  }
               }
           }
           EOF
 
-          cat > app/src/main/java/com/example/tracker/LocationService.kt <<'EOF'
-          package com.example.tracker
+          cat > app/src/main/java/com/example/tracker/LocationService.java <<'EOF'
+          package com.example.tracker;
 
-          import android.Manifest
-          import android.app.Notification
-          import android.app.NotificationChannel
-          import android.app.NotificationManager
-          import android.app.Service
-          import android.content.Intent
-          import android.content.pm.PackageManager
-          import android.os.Build
-          import android.os.IBinder
-          import android.os.Looper
-          import androidx.core.app.NotificationCompat
-          import androidx.core.content.ContextCompat
-          import com.google.android.gms.location.FusedLocationProviderClient
-          import com.google.android.gms.location.LocationCallback
-          import com.google.android.gms.location.LocationRequest
-          import com.google.android.gms.location.LocationResult
-          import com.google.android.gms.location.LocationServices
-          import com.google.android.gms.location.Priority
+          import android.Manifest;
+          import android.app.Notification;
+          import android.app.NotificationChannel;
+          import android.app.NotificationManager;
+          import android.app.PendingIntent;
+          import android.app.Service;
+          import android.content.Context;
+          import android.content.Intent;
+          import android.content.pm.PackageManager;
+          import android.location.Location;
+          import android.location.LocationListener;
+          import android.location.LocationManager;
+          import android.os.Build;
+          import android.os.Bundle;
+          import android.os.IBinder;
 
-          class LocationService : Service() {
-              companion object {
-                  const val ACTION_LOCATION_UPDATE = "com.example.tracker.LOCATION_UPDATE"
+          public class LocationService extends Service implements LocationListener {
+              public static final String ACTION_LOCATION = "com.example.tracker.LOCATION";
+              public static final String EXTRA_LAT = "lat";
+              public static final String EXTRA_LNG = "lng";
+              public static final String EXTRA_ACCURACY = "accuracy";
+              private static final String CHANNEL_ID = "tracking";
+              private LocationManager locationManager;
+
+              @Override
+              public void onCreate() {
+                  super.onCreate();
+                  locationManager = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
+                  createChannel();
+                  startForeground(1, createNotification());
+                  startUpdates();
               }
 
-              private lateinit var fusedLocationClient: FusedLocationProviderClient
-              private lateinit var locationCallback: LocationCallback
-
-              override fun onCreate() {
-                  super.onCreate()
-                  fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
-                  startForeground(1, createNotification())
-                  startLocationUpdates()
+              @Override
+              public int onStartCommand(Intent intent, int flags, int startId) {
+                  startUpdates();
+                  return START_STICKY;
               }
 
-              override fun onDestroy() {
-                  if (::locationCallback.isInitialized) {
-                      fusedLocationClient.removeLocationUpdates(locationCallback)
+              @Override
+              public void onDestroy() {
+                  if (locationManager != null) {
+                      locationManager.removeUpdates(this);
                   }
-                  super.onDestroy()
+                  super.onDestroy();
               }
 
-              override fun onBind(intent: Intent?): IBinder? = null
-
-              private fun createNotification(): Notification {
-                  val channelId = "location_channel"
-                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                      val channel = NotificationChannel(channelId, "Tracking", NotificationManager.IMPORTANCE_LOW)
-                      getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
-                  }
-
-                  return NotificationCompat.Builder(this, channelId)
-                      .setContentTitle("Sekama vieta")
-                      .setContentText("Veikia fone")
-                      .setSmallIcon(android.R.drawable.ic_menu_mylocation)
-                      .setOngoing(true)
-                      .build()
+              @Override
+              public IBinder onBind(Intent intent) {
+                  return null;
               }
 
-              private fun startLocationUpdates() {
-                  if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
-                      != PackageManager.PERMISSION_GRANTED
-                  ) {
-                      stopSelf()
-                      return
+              @Override
+              public void onLocationChanged(Location location) {
+                  Intent intent = new Intent(ACTION_LOCATION);
+                  intent.setPackage(getPackageName());
+                  intent.putExtra(EXTRA_LAT, location.getLatitude());
+                  intent.putExtra(EXTRA_LNG, location.getLongitude());
+                  intent.putExtra(EXTRA_ACCURACY, location.hasAccuracy() ? location.getAccuracy() : 0f);
+                  sendBroadcast(intent);
+              }
+
+              @Override public void onProviderEnabled(String provider) {}
+              @Override public void onProviderDisabled(String provider) {}
+              @Override public void onStatusChanged(String provider, int status, Bundle extras) {}
+
+              private void startUpdates() {
+                  if (locationManager == null || !hasLocationPermission()) {
+                      stopSelf();
+                      return;
                   }
+                  try {
+                      locationManager.removeUpdates(this);
+                      request(LocationManager.GPS_PROVIDER);
+                      request(LocationManager.NETWORK_PROVIDER);
+                  } catch (SecurityException error) {
+                      stopSelf();
+                  }
+              }
 
-                  val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 2000).build()
-
-                  locationCallback = object : LocationCallback() {
-                      override fun onLocationResult(result: LocationResult) {
-                          for (location in result.locations) {
-                              sendLocation(location.latitude, location.longitude)
+              private void request(String provider) {
+                  try {
+                      if (locationManager.isProviderEnabled(provider)) {
+                          locationManager.requestLocationUpdates(provider, 3000L, 3f, this);
+                          Location last = locationManager.getLastKnownLocation(provider);
+                          if (last != null) {
+                              onLocationChanged(last);
                           }
                       }
+                  } catch (Exception ignored) {
                   }
-
-                  fusedLocationClient.requestLocationUpdates(
-                      request,
-                      locationCallback,
-                      Looper.getMainLooper()
-                  )
               }
 
-              private fun sendLocation(lat: Double, lng: Double) {
-                  val intent = Intent(ACTION_LOCATION_UPDATE)
-                  intent.setPackage(packageName)
-                  intent.putExtra("lat", lat)
-                  intent.putExtra("lng", lng)
-                  sendBroadcast(intent)
+              private boolean hasLocationPermission() {
+                  return checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+                          || checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED;
+              }
+
+              private Notification createNotification() {
+                  Intent intent = new Intent(this, MainActivity.class);
+                  int flags = Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? PendingIntent.FLAG_IMMUTABLE : 0;
+                  PendingIntent pendingIntent = PendingIntent.getActivity(this, 0, intent, flags);
+                  Notification.Builder builder = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                          ? new Notification.Builder(this, CHANNEL_ID)
+                          : new Notification.Builder(this);
+                  return builder
+                          .setContentTitle("Tracker veikia")
+                          .setContentText("Programa seka vieta fone.")
+                          .setSmallIcon(android.R.drawable.ic_menu_mylocation)
+                          .setContentIntent(pendingIntent)
+                          .setOngoing(true)
+                          .build();
+              }
+
+              private void createChannel() {
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                      NotificationChannel channel = new NotificationChannel(
+                              CHANNEL_ID,
+                              "Tracker",
+                              NotificationManager.IMPORTANCE_LOW
+                      );
+                      NotificationManager manager = getSystemService(NotificationManager.class);
+                      if (manager != null) {
+                          manager.createNotificationChannel(channel);
+                      }
+                  }
               }
           }
           EOF
