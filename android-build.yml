@@ -31,7 +31,7 @@ jobs:
         shell: bash
         run: |
           rm -rf app
-          mkdir -p app/src/main/java/com/example/tracker app/src/main/assets app/src/main/res/values
+          mkdir -p app/src/main/java/com/example/tracker app/src/main/assets app/src/main/res/values app/src/main/res/drawable app/src/main/res/mipmap-anydpi-v26
 
           cat > settings.gradle <<'EOF'
           pluginManagement {
@@ -61,8 +61,8 @@ jobs:
                   applicationId "com.example.tracker"
                   minSdk 24
                   targetSdk 35
-                  versionCode 4
-                  versionName "1.3"
+                  versionCode 6
+                  versionName "1.5"
               }
               compileOptions {
                   sourceCompatibility JavaVersion.VERSION_17
@@ -97,7 +97,9 @@ jobs:
                   android:allowBackup="true"
                   android:label="Tracker"
                   android:supportsRtl="true"
-                  android:theme="@style/AppTheme">
+                  android:theme="@style/AppTheme"
+                  android:icon="@drawable/ic_launcher"
+                  android:roundIcon="@drawable/ic_launcher">
                   <activity android:name=".MainActivity" android:exported="true">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -110,6 +112,34 @@ jobs:
                       android:foregroundServiceType="location" />
               </application>
           </manifest>
+          EOF
+
+          cat > app/src/main/res/drawable/ic_launcher.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="108dp"
+              android:height="108dp"
+              android:viewportWidth="108"
+              android:viewportHeight="108">
+              <path
+                  android:fillColor="#6d1230"
+                  android:pathData="M0,0 L108,0 L108,108 L0,108 Z" />
+              <path
+                  android:fillColor="#f8fafc"
+                  android:pathData="M14,14 L94,14 L94,94 L14,94 Z" />
+              <path
+                  android:fillColor="#16a34a"
+                  android:pathData="M22,22 L86,22 L86,86 L22,86 Z" />
+              <path
+                  android:fillColor="#2563eb"
+                  android:pathData="M22,66 L39,54 L53,60 L72,45 L88,52 L88,86 L22,86 Z" />
+              <path
+                  android:fillColor="#facc15"
+                  android:pathData="M73,20 L83,30 L64,44 L75,66 L66,74 L51,54 L34,65 L27,58 L43,43 L31,27 L39,20 L57,34 Z" />
+              <path
+                  android:fillColor="#6d1230"
+                  android:pathData="M48,45 L60,45 L60,57 L48,57 Z" />
+          </vector>
           EOF
 
           cat > app/src/main/assets/map.html <<'EOF'
@@ -148,6 +178,7 @@ jobs:
               }).addTo(map);
 
               let points = [];
+              let currentMode = "ground";
               const layers = L.layerGroup().addTo(map);
 
               function valid(item) {
@@ -177,7 +208,7 @@ jobs:
                       ).addTo(layers);
                   }
                   const last = points[points.length - 1];
-                  L.marker([last.lat, last.lng], { icon: iconFor(last.mode || "ground") }).addTo(layers);
+                  L.marker([last.lat, last.lng], { icon: iconFor(currentMode || last.mode || "ground") }).addTo(layers);
                   const latLngs = points.map(p => [p.lat, p.lng]);
                   if (fit && latLngs.length > 1) {
                       map.fitBounds(L.latLngBounds(latLngs), { padding: [32, 32], maxZoom: 17 });
@@ -201,6 +232,11 @@ jobs:
                   points.push({ lat, lng, mode: mode || "ground" });
                   draw(false);
               };
+
+              window.setCurrentMode = function(mode) {
+                  currentMode = mode || "ground";
+                  draw(false);
+              };
           </script>
           </body>
           </html>
@@ -215,6 +251,7 @@ jobs:
           final class TrackingState {
               private static final String PREFS = "tracking_state";
               private static final String RUNNING = "running";
+              private static final String MANUAL_MODE = "manual_mode";
               private TrackingState() {}
               static boolean isRunning(Context context) {
                   return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(RUNNING, false);
@@ -222,6 +259,14 @@ jobs:
               static void setRunning(Context context, boolean running) {
                   SharedPreferences.Editor editor = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit();
                   editor.putBoolean(RUNNING, running);
+                  editor.apply();
+              }
+              static String getManualMode(Context context) {
+                  return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(MANUAL_MODE, MovementMode.GROUND);
+              }
+              static void setManualMode(Context context, String mode) {
+                  SharedPreferences.Editor editor = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit();
+                  editor.putString(MANUAL_MODE, mode == null ? MovementMode.GROUND : mode);
                   editor.apply();
               }
           }
@@ -328,6 +373,23 @@ jobs:
                   );
               }
 
+              synchronized Location latestLocation() {
+                  Cursor cursor = latestCursor();
+                  try {
+                      if (!cursor.moveToFirst()) {
+                          return null;
+                      }
+                      Location location = new Location("db");
+                      location.setLatitude(cursor.getDouble(0));
+                      location.setLongitude(cursor.getDouble(1));
+                      location.setAccuracy(cursor.getFloat(2));
+                      location.setTime(cursor.getLong(3));
+                      return location;
+                  } finally {
+                      cursor.close();
+                  }
+              }
+
               synchronized String statisticsText() {
                   double total = 0;
                   double air = 0;
@@ -386,6 +448,8 @@ jobs:
           import android.content.pm.PackageManager;
           import android.database.Cursor;
           import android.graphics.Color;
+          import android.graphics.Typeface;
+          import android.graphics.drawable.GradientDrawable;
           import android.os.Build;
           import android.os.Bundle;
           import android.webkit.WebSettings;
@@ -404,8 +468,12 @@ jobs:
               private WebView webView;
               private TextView status;
               private Button trackingButton;
+              private Button groundButton;
+              private Button airButton;
+              private Button seaButton;
               private RouteStore routeStore;
               private boolean mapReady;
+              private final int burgundy = Color.rgb(109, 18, 48);
 
               private final BroadcastReceiver receiver = new BroadcastReceiver() {
                   @Override
@@ -414,7 +482,11 @@ jobs:
                       double lng = intent.getDoubleExtra(LocationService.EXTRA_LNG, Double.NaN);
                       float accuracy = intent.getFloatExtra(LocationService.EXTRA_ACCURACY, 0f);
                       String mode = intent.getStringExtra(LocationService.EXTRA_MODE);
-                      showLocation(lat, lng, accuracy, mode);
+                      if (intent.getBooleanExtra(LocationService.EXTRA_RELOAD, false)) {
+                          loadSavedRoute();
+                      } else {
+                          showLocation(lat, lng, accuracy, mode);
+                      }
                   }
               };
 
@@ -425,6 +497,7 @@ jobs:
                   buildUi();
                   setupMap();
                   refreshButton();
+                  refreshModeButtons();
                   if (!hasLocationPermission()) {
                       requestNeededPermissions();
                   } else if (TrackingState.isRunning(this)) {
@@ -442,6 +515,7 @@ jobs:
                       registerReceiver(receiver, filter);
                   }
                   refreshButton();
+                  refreshModeButtons();
               }
 
               @Override
@@ -496,9 +570,23 @@ jobs:
 
                   Button statsButton = new Button(this);
                   statsButton.setText("Statistika");
+                  styleButton(statsButton, Color.rgb(250, 204, 21), Color.rgb(17, 24, 39));
                   statsButton.setOnClickListener(v -> showStatistics());
                   actions.addView(statsButton, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
                   root.addView(actions, new LinearLayout.LayoutParams(
+                          LinearLayout.LayoutParams.MATCH_PARENT,
+                          LinearLayout.LayoutParams.WRAP_CONTENT
+                  ));
+
+                  LinearLayout modes = new LinearLayout(this);
+                  modes.setOrientation(LinearLayout.HORIZONTAL);
+                  groundButton = modeButton("Zeme", MovementMode.GROUND);
+                  airButton = modeButton("Lektuvas", MovementMode.AIR);
+                  seaButton = modeButton("Laivas", MovementMode.SEA);
+                  modes.addView(groundButton, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+                  modes.addView(airButton, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+                  modes.addView(seaButton, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+                  root.addView(modes, new LinearLayout.LayoutParams(
                           LinearLayout.LayoutParams.MATCH_PARENT,
                           LinearLayout.LayoutParams.WRAP_CONTENT
                   ));
@@ -510,6 +598,18 @@ jobs:
                           1
                   ));
                   setContentView(root);
+              }
+
+              private Button modeButton(String label, String mode) {
+                  Button button = new Button(this);
+                  button.setText(label);
+                  button.setOnClickListener(v -> {
+                      TrackingState.setManualMode(this, mode);
+                      refreshModeButtons();
+                      updateMapMarkerMode(mode);
+                      status.setText("Pasirinktas rezimas: " + readableMode(mode));
+                  });
+                  return button;
               }
 
               private void setupMap() {
@@ -592,8 +692,45 @@ jobs:
               private void refreshButton() {
                   boolean running = TrackingState.isRunning(this);
                   trackingButton.setText(running ? "Stabdyti sekima" : "Pradeti sekima");
-                  trackingButton.setBackgroundColor(running ? Color.rgb(22, 163, 74) : Color.rgb(220, 38, 38));
-                  trackingButton.setTextColor(Color.WHITE);
+                  styleButton(trackingButton, running ? Color.rgb(22, 163, 74) : Color.rgb(220, 38, 38), Color.WHITE);
+              }
+
+              private void refreshModeButtons() {
+                  String mode = TrackingState.getManualMode(this);
+                  styleModeButton(groundButton, MovementMode.GROUND.equals(mode), Color.rgb(22, 163, 74));
+                  styleModeButton(airButton, MovementMode.AIR.equals(mode), Color.rgb(250, 204, 21));
+                  styleModeButton(seaButton, MovementMode.SEA.equals(mode), Color.rgb(37, 99, 235));
+              }
+
+              private void styleModeButton(Button button, boolean selected, int color) {
+                  if (button == null) return;
+                  int fill = selected ? color : Color.rgb(245, 245, 245);
+                  int text = selected && color != Color.rgb(250, 204, 21) ? Color.WHITE : Color.rgb(17, 24, 39);
+                  styleButton(button, fill, text);
+              }
+
+              private void styleButton(Button button, int fillColor, int textColor) {
+                  GradientDrawable background = new GradientDrawable();
+                  background.setShape(GradientDrawable.RECTANGLE);
+                  background.setColor(fillColor);
+                  background.setCornerRadius(dp(14));
+                  background.setStroke(dp(2), burgundy);
+                  button.setBackground(background);
+                  button.setTextColor(textColor);
+                  button.setTypeface(Typeface.DEFAULT_BOLD);
+                  button.setAllCaps(false);
+                  button.setPadding(dp(10), dp(8), dp(10), dp(8));
+              }
+
+              private int dp(int value) {
+                  return (int) (value * getResources().getDisplayMetrics().density + 0.5f);
+              }
+
+              private void updateMapMarkerMode(String mode) {
+                  if (mapReady) {
+                      String safeMode = mode == null ? MovementMode.GROUND : mode;
+                      webView.evaluateJavascript("window.setCurrentMode('" + safeMode + "')", null);
+                  }
               }
 
               private void showLocation(double lat, double lng, float accuracy, String mode) {
@@ -649,11 +786,14 @@ jobs:
               public static final String EXTRA_LNG = "lng";
               public static final String EXTRA_ACCURACY = "accuracy";
               public static final String EXTRA_MODE = "mode";
+              public static final String EXTRA_RELOAD = "reload";
               private static final String CHANNEL_ID = "tracking";
               private static final float MAX_ACCURACY_METERS = 45f;
               private static final float MIN_DISTANCE_METERS = 12f;
               private static final long MIN_TIME_MS = 5000L;
               private static final float GLITCH_SPEED_MPS = 95f;
+              private static final float FLIGHT_GAP_DISTANCE_METERS = 250000f;
+              private static final long FLIGHT_GAP_TIME_MS = 20L * 60L * 1000L;
               private LocationManager locationManager;
               private RouteStore routeStore;
               private Location lastAccepted;
@@ -663,6 +803,7 @@ jobs:
               public void onCreate() {
                   super.onCreate();
                   routeStore = new RouteStore(this);
+                  lastAccepted = routeStore.latestLocation();
                   locationManager = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
                   createChannel();
                   startForeground(1, createNotification());
@@ -688,23 +829,32 @@ jobs:
 
               @Override
               public void onLocationChanged(Location location) {
-                  if (!shouldAccept(location)) return;
+                  String manualMode = TrackingState.getManualMode(this);
+                  boolean flightGap = isFlightGap(location, manualMode);
+                  if (!shouldAccept(location) && !flightGap) return;
                   String mode = classify(location);
+                  boolean reload = false;
+                  if (flightGap) {
+                      addFlightBridge(lastAccepted, location);
+                      reload = true;
+                  } else {
+                      routeStore.add(
+                              location.getLatitude(),
+                              location.getLongitude(),
+                              location.hasAccuracy() ? location.getAccuracy() : 0f,
+                              location.getTime() > 0 ? location.getTime() : System.currentTimeMillis(),
+                              location.getProvider(),
+                              mode
+                      );
+                  }
                   lastAccepted = new Location(location);
-                  routeStore.add(
-                          location.getLatitude(),
-                          location.getLongitude(),
-                          location.hasAccuracy() ? location.getAccuracy() : 0f,
-                          location.getTime() > 0 ? location.getTime() : System.currentTimeMillis(),
-                          location.getProvider(),
-                          mode
-                  );
                   Intent intent = new Intent(ACTION_LOCATION);
                   intent.setPackage(getPackageName());
                   intent.putExtra(EXTRA_LAT, location.getLatitude());
                   intent.putExtra(EXTRA_LNG, location.getLongitude());
                   intent.putExtra(EXTRA_ACCURACY, location.hasAccuracy() ? location.getAccuracy() : 0f);
                   intent.putExtra(EXTRA_MODE, mode);
+                  intent.putExtra(EXTRA_RELOAD, reload);
                   sendBroadcast(intent);
               }
 
@@ -759,6 +909,10 @@ jobs:
               }
 
               private String classify(Location location) {
+                  String manualMode = TrackingState.getManualMode(this);
+                  if (MovementMode.AIR.equals(manualMode) || MovementMode.SEA.equals(manualMode)) {
+                      return manualMode;
+                  }
                   if (lastAccepted == null) return MovementMode.GROUND;
                   long dtMs = Math.max(1L, effectiveTime(location) - effectiveTime(lastAccepted));
                   float distance = location.distanceTo(lastAccepted);
@@ -776,6 +930,47 @@ jobs:
                       return MovementMode.SEA;
                   }
                   return MovementMode.GROUND;
+              }
+
+              private boolean isFlightGap(Location location, String manualMode) {
+                  if (!MovementMode.AIR.equals(manualMode) || lastAccepted == null || location == null) {
+                      return false;
+                  }
+                  long dtMs = Math.max(1L, effectiveTime(location) - effectiveTime(lastAccepted));
+                  float distance = location.distanceTo(lastAccepted);
+                  return dtMs >= FLIGHT_GAP_TIME_MS && distance >= FLIGHT_GAP_DISTANCE_METERS;
+              }
+
+              private void addFlightBridge(Location from, Location to) {
+                  if (from == null || to == null) return;
+                  int steps = Math.max(8, Math.min(80, (int) (from.distanceTo(to) / 50000f)));
+                  long start = effectiveTime(from);
+                  long end = effectiveTime(to);
+                  for (int i = 1; i <= steps; i++) {
+                      double f = i / (double) steps;
+                      double[] point = interpolateGreatCircle(from.getLatitude(), from.getLongitude(), to.getLatitude(), to.getLongitude(), f);
+                      long time = start + (long) ((end - start) * f);
+                      routeStore.add(point[0], point[1], to.hasAccuracy() ? to.getAccuracy() : 0f, time, "flight-bridge", MovementMode.AIR);
+                  }
+              }
+
+              private double[] interpolateGreatCircle(double lat1, double lng1, double lat2, double lng2, double fraction) {
+                  double phi1 = Math.toRadians(lat1);
+                  double lambda1 = Math.toRadians(lng1);
+                  double phi2 = Math.toRadians(lat2);
+                  double lambda2 = Math.toRadians(lng2);
+                  double d = 2 * Math.asin(Math.sqrt(
+                          Math.pow(Math.sin((phi2 - phi1) / 2), 2)
+                                  + Math.cos(phi1) * Math.cos(phi2) * Math.pow(Math.sin((lambda2 - lambda1) / 2), 2)));
+                  if (d == 0) return new double[]{lat1, lng1};
+                  double a = Math.sin((1 - fraction) * d) / Math.sin(d);
+                  double b = Math.sin(fraction * d) / Math.sin(d);
+                  double x = a * Math.cos(phi1) * Math.cos(lambda1) + b * Math.cos(phi2) * Math.cos(lambda2);
+                  double y = a * Math.cos(phi1) * Math.sin(lambda1) + b * Math.cos(phi2) * Math.sin(lambda2);
+                  double z = a * Math.sin(phi1) + b * Math.sin(phi2);
+                  double phi = Math.atan2(z, Math.sqrt(x * x + y * y));
+                  double lambda = Math.atan2(y, x);
+                  return new double[]{Math.toDegrees(phi), Math.toDegrees(lambda)};
               }
 
               private long effectiveTime(Location location) {
