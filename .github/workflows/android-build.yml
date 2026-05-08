@@ -31,7 +31,7 @@ jobs:
         shell: bash
         run: |
           rm -rf app
-          mkdir -p app/src/main/java/com/example/tracker app/src/main/assets app/src/main/res/values
+          mkdir -p app/src/main/java/com/example/tracker app/src/main/assets app/src/main/res/values app/src/main/res/drawable app/src/main/res/mipmap-anydpi-v26
 
           cat > settings.gradle <<'EOF'
           pluginManagement {
@@ -61,8 +61,8 @@ jobs:
                   applicationId "com.example.tracker"
                   minSdk 24
                   targetSdk 35
-                  versionCode 5
-                  versionName "1.4"
+                  versionCode 6
+                  versionName "1.5"
               }
               compileOptions {
                   sourceCompatibility JavaVersion.VERSION_17
@@ -97,7 +97,9 @@ jobs:
                   android:allowBackup="true"
                   android:label="Tracker"
                   android:supportsRtl="true"
-                  android:theme="@style/AppTheme">
+                  android:theme="@style/AppTheme"
+                  android:icon="@drawable/ic_launcher"
+                  android:roundIcon="@drawable/ic_launcher">
                   <activity android:name=".MainActivity" android:exported="true">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -110,6 +112,34 @@ jobs:
                       android:foregroundServiceType="location" />
               </application>
           </manifest>
+          EOF
+
+          cat > app/src/main/res/drawable/ic_launcher.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="108dp"
+              android:height="108dp"
+              android:viewportWidth="108"
+              android:viewportHeight="108">
+              <path
+                  android:fillColor="#6d1230"
+                  android:pathData="M0,0 L108,0 L108,108 L0,108 Z" />
+              <path
+                  android:fillColor="#f8fafc"
+                  android:pathData="M14,14 L94,14 L94,94 L14,94 Z" />
+              <path
+                  android:fillColor="#16a34a"
+                  android:pathData="M22,22 L86,22 L86,86 L22,86 Z" />
+              <path
+                  android:fillColor="#2563eb"
+                  android:pathData="M22,66 L39,54 L53,60 L72,45 L88,52 L88,86 L22,86 Z" />
+              <path
+                  android:fillColor="#facc15"
+                  android:pathData="M73,20 L83,30 L64,44 L75,66 L66,74 L51,54 L34,65 L27,58 L43,43 L31,27 L39,20 L57,34 Z" />
+              <path
+                  android:fillColor="#6d1230"
+                  android:pathData="M48,45 L60,45 L60,57 L48,57 Z" />
+          </vector>
           EOF
 
           cat > app/src/main/assets/map.html <<'EOF'
@@ -148,6 +178,7 @@ jobs:
               }).addTo(map);
 
               let points = [];
+              let currentMode = "ground";
               const layers = L.layerGroup().addTo(map);
 
               function valid(item) {
@@ -177,7 +208,7 @@ jobs:
                       ).addTo(layers);
                   }
                   const last = points[points.length - 1];
-                  L.marker([last.lat, last.lng], { icon: iconFor(last.mode || "ground") }).addTo(layers);
+                  L.marker([last.lat, last.lng], { icon: iconFor(currentMode || last.mode || "ground") }).addTo(layers);
                   const latLngs = points.map(p => [p.lat, p.lng]);
                   if (fit && latLngs.length > 1) {
                       map.fitBounds(L.latLngBounds(latLngs), { padding: [32, 32], maxZoom: 17 });
@@ -199,6 +230,11 @@ jobs:
                   lat = Number(lat); lng = Number(lng);
                   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
                   points.push({ lat, lng, mode: mode || "ground" });
+                  draw(false);
+              };
+
+              window.setCurrentMode = function(mode) {
+                  currentMode = mode || "ground";
                   draw(false);
               };
           </script>
@@ -412,6 +448,8 @@ jobs:
           import android.content.pm.PackageManager;
           import android.database.Cursor;
           import android.graphics.Color;
+          import android.graphics.Typeface;
+          import android.graphics.drawable.GradientDrawable;
           import android.os.Build;
           import android.os.Bundle;
           import android.webkit.WebSettings;
@@ -435,6 +473,7 @@ jobs:
               private Button seaButton;
               private RouteStore routeStore;
               private boolean mapReady;
+              private final int burgundy = Color.rgb(109, 18, 48);
 
               private final BroadcastReceiver receiver = new BroadcastReceiver() {
                   @Override
@@ -531,8 +570,7 @@ jobs:
 
                   Button statsButton = new Button(this);
                   statsButton.setText("Statistika");
-                  statsButton.setBackgroundColor(Color.rgb(250, 204, 21));
-                  statsButton.setTextColor(Color.rgb(17, 24, 39));
+                  styleButton(statsButton, Color.rgb(250, 204, 21), Color.rgb(17, 24, 39));
                   statsButton.setOnClickListener(v -> showStatistics());
                   actions.addView(statsButton, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
                   root.addView(actions, new LinearLayout.LayoutParams(
@@ -568,6 +606,7 @@ jobs:
                   button.setOnClickListener(v -> {
                       TrackingState.setManualMode(this, mode);
                       refreshModeButtons();
+                      updateMapMarkerMode(mode);
                       status.setText("Pasirinktas rezimas: " + readableMode(mode));
                   });
                   return button;
@@ -653,8 +692,7 @@ jobs:
               private void refreshButton() {
                   boolean running = TrackingState.isRunning(this);
                   trackingButton.setText(running ? "Stabdyti sekima" : "Pradeti sekima");
-                  trackingButton.setBackgroundColor(running ? Color.rgb(22, 163, 74) : Color.rgb(220, 38, 38));
-                  trackingButton.setTextColor(Color.WHITE);
+                  styleButton(trackingButton, running ? Color.rgb(22, 163, 74) : Color.rgb(220, 38, 38), Color.WHITE);
               }
 
               private void refreshModeButtons() {
@@ -666,8 +704,33 @@ jobs:
 
               private void styleModeButton(Button button, boolean selected, int color) {
                   if (button == null) return;
-                  button.setBackgroundColor(selected ? color : Color.rgb(229, 231, 235));
-                  button.setTextColor(selected && color != Color.rgb(250, 204, 21) ? Color.WHITE : Color.rgb(17, 24, 39));
+                  int fill = selected ? color : Color.rgb(245, 245, 245);
+                  int text = selected && color != Color.rgb(250, 204, 21) ? Color.WHITE : Color.rgb(17, 24, 39);
+                  styleButton(button, fill, text);
+              }
+
+              private void styleButton(Button button, int fillColor, int textColor) {
+                  GradientDrawable background = new GradientDrawable();
+                  background.setShape(GradientDrawable.RECTANGLE);
+                  background.setColor(fillColor);
+                  background.setCornerRadius(dp(14));
+                  background.setStroke(dp(2), burgundy);
+                  button.setBackground(background);
+                  button.setTextColor(textColor);
+                  button.setTypeface(Typeface.DEFAULT_BOLD);
+                  button.setAllCaps(false);
+                  button.setPadding(dp(10), dp(8), dp(10), dp(8));
+              }
+
+              private int dp(int value) {
+                  return (int) (value * getResources().getDisplayMetrics().density + 0.5f);
+              }
+
+              private void updateMapMarkerMode(String mode) {
+                  if (mapReady) {
+                      String safeMode = mode == null ? MovementMode.GROUND : mode;
+                      webView.evaluateJavascript("window.setCurrentMode('" + safeMode + "')", null);
+                  }
               }
 
               private void showLocation(double lat, double lng, float accuracy, String mode) {
