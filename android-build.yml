@@ -1,0 +1,827 @@
+name: Build Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.9
+
+      - name: Generate complete Android project
+        shell: bash
+        run: |
+          rm -rf app
+          mkdir -p app/src/main/java/com/example/tracker app/src/main/assets app/src/main/res/values
+
+          cat > settings.gradle <<'EOF'
+          pluginManagement {
+              repositories { google(); mavenCentral(); gradlePluginPortal() }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories { google(); mavenCentral() }
+          }
+          rootProject.name = "TrackerApp"
+          include ":app"
+          EOF
+
+          cat > build.gradle <<'EOF'
+          plugins {
+              id "com.android.application" version "8.7.3" apply false
+          }
+          EOF
+
+          cat > app/build.gradle <<'EOF'
+          plugins { id "com.android.application" }
+
+          android {
+              namespace "com.example.tracker"
+              compileSdk 35
+              defaultConfig {
+                  applicationId "com.example.tracker"
+                  minSdk 24
+                  targetSdk 35
+                  versionCode 4
+                  versionName "1.3"
+              }
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }
+          }
+          EOF
+
+          cat > app/src/main/res/values/styles.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <style name="AppTheme" parent="android:style/Theme.Material.Light.NoActionBar">
+                  <item name="android:fontFamily">sans</item>
+                  <item name="android:colorAccent">#0f766e</item>
+                  <item name="android:windowLightStatusBar">true</item>
+                  <item name="android:navigationBarColor">#ffffff</item>
+              </style>
+          </resources>
+          EOF
+
+          cat > app/src/main/AndroidManifest.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+              <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+              <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+              <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+              <uses-permission android:name="android.permission.INTERNET" />
+              <application
+                  android:allowBackup="true"
+                  android:label="Tracker"
+                  android:supportsRtl="true"
+                  android:theme="@style/AppTheme">
+                  <activity android:name=".MainActivity" android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+                  <service
+                      android:name=".LocationService"
+                      android:exported="false"
+                      android:foregroundServiceType="location" />
+              </application>
+          </manifest>
+          EOF
+
+          cat > app/src/main/assets/map.html <<'EOF'
+          <!doctype html>
+          <html>
+          <head>
+              <meta charset="utf-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1">
+              <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+              <style>
+                  html, body, #map { height: 100%; margin: 0; }
+                  body { font-family: system-ui, sans-serif; }
+                  #empty {
+                      align-items: center; background: #f8fafc; color: #334155;
+                      display: flex; inset: 0; justify-content: center; padding: 24px;
+                      position: absolute; text-align: center; z-index: 500;
+                  }
+                  .mode-icon {
+                      background: #fff; border: 2px solid #111827; border-radius: 50%;
+                      box-shadow: 0 1px 6px rgba(0,0,0,.25); font-size: 18px;
+                      height: 30px; line-height: 28px; text-align: center; width: 30px;
+                  }
+              </style>
+          </head>
+          <body>
+          <div id="map"></div>
+          <div id="empty">Laukiama GPS vietos...</div>
+          <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+          <script>
+              const colors = { air: "#facc15", sea: "#2563eb", ground: "#16a34a" };
+              const labels = { air: "✈", sea: "⛵", ground: "🌐" };
+              const map = L.map("map").setView([54.6872, 25.2797], 12);
+              L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+                  maxZoom: 19,
+                  attribution: "OpenStreetMap"
+              }).addTo(map);
+
+              let points = [];
+              const layers = L.layerGroup().addTo(map);
+
+              function valid(item) {
+                  return item && Number.isFinite(Number(item.lat)) && Number.isFinite(Number(item.lng));
+              }
+
+              function iconFor(mode) {
+                  return L.divIcon({
+                      className: "mode-icon",
+                      html: labels[mode] || labels.ground,
+                      iconSize: [30, 30],
+                      iconAnchor: [15, 15]
+                  });
+              }
+
+              function draw(fit) {
+                  layers.clearLayers();
+                  if (!points.length) return;
+                  document.getElementById("empty").style.display = "none";
+                  for (let i = 1; i < points.length; i++) {
+                      const previous = points[i - 1];
+                      const current = points[i];
+                      const mode = current.mode || "ground";
+                      L.polyline(
+                          [[previous.lat, previous.lng], [current.lat, current.lng]],
+                          { color: colors[mode] || colors.ground, weight: 5, opacity: 0.9 }
+                      ).addTo(layers);
+                  }
+                  const last = points[points.length - 1];
+                  L.marker([last.lat, last.lng], { icon: iconFor(last.mode || "ground") }).addTo(layers);
+                  const latLngs = points.map(p => [p.lat, p.lng]);
+                  if (fit && latLngs.length > 1) {
+                      map.fitBounds(L.latLngBounds(latLngs), { padding: [32, 32], maxZoom: 17 });
+                  } else {
+                      map.setView([last.lat, last.lng], Math.max(map.getZoom(), 16));
+                  }
+              }
+
+              window.setLocations = function(items) {
+                  points = (items || []).filter(valid).map(item => ({
+                      lat: Number(item.lat),
+                      lng: Number(item.lng),
+                      mode: item.mode || "ground"
+                  }));
+                  draw(true);
+              };
+
+              window.addLocation = function(lat, lng, accuracy, mode) {
+                  lat = Number(lat); lng = Number(lng);
+                  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+                  points.push({ lat, lng, mode: mode || "ground" });
+                  draw(false);
+              };
+          </script>
+          </body>
+          </html>
+          EOF
+
+          cat > app/src/main/java/com/example/tracker/TrackingState.java <<'EOF'
+          package com.example.tracker;
+
+          import android.content.Context;
+          import android.content.SharedPreferences;
+
+          final class TrackingState {
+              private static final String PREFS = "tracking_state";
+              private static final String RUNNING = "running";
+              private TrackingState() {}
+              static boolean isRunning(Context context) {
+                  return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(RUNNING, false);
+              }
+              static void setRunning(Context context, boolean running) {
+                  SharedPreferences.Editor editor = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit();
+                  editor.putBoolean(RUNNING, running);
+                  editor.apply();
+              }
+          }
+          EOF
+
+          cat > app/src/main/java/com/example/tracker/MovementMode.java <<'EOF'
+          package com.example.tracker;
+
+          final class MovementMode {
+              static final String AIR = "air";
+              static final String SEA = "sea";
+              static final String GROUND = "ground";
+              private MovementMode() {}
+          }
+          EOF
+
+          cat > app/src/main/java/com/example/tracker/RouteStore.java <<'EOF'
+          package com.example.tracker;
+
+          import android.content.ContentValues;
+          import android.content.Context;
+          import android.database.Cursor;
+          import android.database.sqlite.SQLiteDatabase;
+          import android.database.sqlite.SQLiteOpenHelper;
+          import android.location.Location;
+
+          import org.json.JSONArray;
+          import org.json.JSONObject;
+
+          import java.util.Locale;
+
+          final class RouteStore extends SQLiteOpenHelper {
+              private static final String DB_NAME = "route.db";
+              private static final int DB_VERSION = 2;
+              private static final String TABLE = "points";
+
+              RouteStore(Context context) {
+                  super(context, DB_NAME, null, DB_VERSION);
+              }
+
+              @Override
+              public void onCreate(SQLiteDatabase db) {
+                  db.execSQL("CREATE TABLE " + TABLE + " (" +
+                          "id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                          "lat REAL NOT NULL," +
+                          "lng REAL NOT NULL," +
+                          "accuracy REAL NOT NULL," +
+                          "time INTEGER NOT NULL," +
+                          "provider TEXT," +
+                          "mode TEXT NOT NULL DEFAULT 'ground')");
+              }
+
+              @Override
+              public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
+                  if (oldVersion < 2) {
+                      db.execSQL("ALTER TABLE " + TABLE + " ADD COLUMN mode TEXT NOT NULL DEFAULT 'ground'");
+                  }
+              }
+
+              synchronized void add(double lat, double lng, float accuracy, long time, String provider, String mode) {
+                  ContentValues values = new ContentValues();
+                  values.put("lat", lat);
+                  values.put("lng", lng);
+                  values.put("accuracy", accuracy);
+                  values.put("time", time);
+                  values.put("provider", provider == null ? "" : provider);
+                  values.put("mode", mode == null ? MovementMode.GROUND : mode);
+                  getWritableDatabase().insert(TABLE, null, values);
+              }
+
+              synchronized JSONArray readAllJson() {
+                  JSONArray array = new JSONArray();
+                  Cursor cursor = getReadableDatabase().query(
+                          TABLE,
+                          new String[]{"lat", "lng", "accuracy", "time", "provider", "mode"},
+                          null, null, null, null,
+                          "time ASC, id ASC"
+                  );
+                  try {
+                      while (cursor.moveToNext()) {
+                          JSONObject item = new JSONObject();
+                          item.put("lat", cursor.getDouble(0));
+                          item.put("lng", cursor.getDouble(1));
+                          item.put("accuracy", cursor.getFloat(2));
+                          item.put("time", cursor.getLong(3));
+                          item.put("provider", cursor.getString(4));
+                          item.put("mode", cursor.getString(5));
+                          array.put(item);
+                      }
+                  } catch (Exception ignored) {
+                  } finally {
+                      cursor.close();
+                  }
+                  return array;
+              }
+
+              synchronized Cursor latestCursor() {
+                  return getReadableDatabase().query(
+                          TABLE,
+                          new String[]{"lat", "lng", "accuracy", "time", "mode"},
+                          null, null, null, null,
+                          "time DESC, id DESC",
+                          "1"
+                  );
+              }
+
+              synchronized String statisticsText() {
+                  double total = 0;
+                  double air = 0;
+                  double sea = 0;
+                  double ground = 0;
+                  Location previous = null;
+                  String previousMode = MovementMode.GROUND;
+
+                  Cursor cursor = getReadableDatabase().query(
+                          TABLE,
+                          new String[]{"lat", "lng", "mode"},
+                          null, null, null, null,
+                          "time ASC, id ASC"
+                  );
+                  try {
+                      while (cursor.moveToNext()) {
+                          Location current = new Location("db");
+                          current.setLatitude(cursor.getDouble(0));
+                          current.setLongitude(cursor.getDouble(1));
+                          String mode = cursor.getString(2);
+                          if (previous != null) {
+                              double km = previous.distanceTo(current) / 1000.0;
+                              total += km;
+                              if (MovementMode.AIR.equals(mode)) {
+                                  air += km;
+                              } else if (MovementMode.SEA.equals(mode)) {
+                                  sea += km;
+                              } else {
+                                  ground += km;
+                              }
+                          }
+                          previous = current;
+                          previousMode = mode;
+                      }
+                  } finally {
+                      cursor.close();
+                  }
+
+                  return String.format(Locale.US,
+                          "Visas kelias: %.2f km\n\n✈ Lektuvu: %.2f km\n⛵ Laivu: %.2f km\n🌐 Zeme: %.2f km",
+                          total, air, sea, ground);
+              }
+          }
+          EOF
+
+          cat > app/src/main/java/com/example/tracker/MainActivity.java <<'EOF'
+          package com.example.tracker;
+
+          import android.Manifest;
+          import android.app.Activity;
+          import android.app.AlertDialog;
+          import android.content.BroadcastReceiver;
+          import android.content.Context;
+          import android.content.Intent;
+          import android.content.IntentFilter;
+          import android.content.pm.PackageManager;
+          import android.database.Cursor;
+          import android.graphics.Color;
+          import android.os.Build;
+          import android.os.Bundle;
+          import android.webkit.WebSettings;
+          import android.webkit.WebView;
+          import android.webkit.WebViewClient;
+          import android.widget.Button;
+          import android.widget.LinearLayout;
+          import android.widget.TextView;
+
+          import org.json.JSONArray;
+
+          import java.util.Locale;
+
+          public class MainActivity extends Activity {
+              private static final int REQUEST_PERMISSIONS = 100;
+              private WebView webView;
+              private TextView status;
+              private Button trackingButton;
+              private RouteStore routeStore;
+              private boolean mapReady;
+
+              private final BroadcastReceiver receiver = new BroadcastReceiver() {
+                  @Override
+                  public void onReceive(Context context, Intent intent) {
+                      double lat = intent.getDoubleExtra(LocationService.EXTRA_LAT, Double.NaN);
+                      double lng = intent.getDoubleExtra(LocationService.EXTRA_LNG, Double.NaN);
+                      float accuracy = intent.getFloatExtra(LocationService.EXTRA_ACCURACY, 0f);
+                      String mode = intent.getStringExtra(LocationService.EXTRA_MODE);
+                      showLocation(lat, lng, accuracy, mode);
+                  }
+              };
+
+              @Override
+              protected void onCreate(Bundle savedInstanceState) {
+                  super.onCreate(savedInstanceState);
+                  routeStore = new RouteStore(this);
+                  buildUi();
+                  setupMap();
+                  refreshButton();
+                  if (!hasLocationPermission()) {
+                      requestNeededPermissions();
+                  } else if (TrackingState.isRunning(this)) {
+                      startTracking();
+                  }
+              }
+
+              @Override
+              protected void onStart() {
+                  super.onStart();
+                  IntentFilter filter = new IntentFilter(LocationService.ACTION_LOCATION);
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                      registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED);
+                  } else {
+                      registerReceiver(receiver, filter);
+                  }
+                  refreshButton();
+              }
+
+              @Override
+              protected void onStop() {
+                  unregisterReceiver(receiver);
+                  super.onStop();
+              }
+
+              @Override
+              protected void onDestroy() {
+                  routeStore.close();
+                  super.onDestroy();
+              }
+
+              @Override
+              public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+                  super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+                  if (requestCode == REQUEST_PERMISSIONS && hasLocationPermission()) {
+                      startTracking();
+                  } else {
+                      status.setText("Suteikite vietos leidima, kad programa galetu sekti marsruta.");
+                  }
+              }
+
+              private void buildUi() {
+                  LinearLayout root = new LinearLayout(this);
+                  root.setOrientation(LinearLayout.VERTICAL);
+
+                  status = new TextView(this);
+                  status.setText("Tracker parengtas.");
+                  status.setTextSize(15);
+                  status.setPadding(16, 16, 16, 8);
+                  root.addView(status, new LinearLayout.LayoutParams(
+                          LinearLayout.LayoutParams.MATCH_PARENT,
+                          LinearLayout.LayoutParams.WRAP_CONTENT
+                  ));
+
+                  LinearLayout actions = new LinearLayout(this);
+                  actions.setOrientation(LinearLayout.HORIZONTAL);
+
+                  trackingButton = new Button(this);
+                  trackingButton.setOnClickListener(v -> {
+                      if (TrackingState.isRunning(this)) {
+                          stopTracking();
+                      } else if (hasLocationPermission()) {
+                          startTracking();
+                      } else {
+                          requestNeededPermissions();
+                      }
+                  });
+                  actions.addView(trackingButton, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+
+                  Button statsButton = new Button(this);
+                  statsButton.setText("Statistika");
+                  statsButton.setOnClickListener(v -> showStatistics());
+                  actions.addView(statsButton, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+                  root.addView(actions, new LinearLayout.LayoutParams(
+                          LinearLayout.LayoutParams.MATCH_PARENT,
+                          LinearLayout.LayoutParams.WRAP_CONTENT
+                  ));
+
+                  webView = new WebView(this);
+                  root.addView(webView, new LinearLayout.LayoutParams(
+                          LinearLayout.LayoutParams.MATCH_PARENT,
+                          0,
+                          1
+                  ));
+                  setContentView(root);
+              }
+
+              private void setupMap() {
+                  WebSettings settings = webView.getSettings();
+                  settings.setJavaScriptEnabled(true);
+                  settings.setDomStorageEnabled(true);
+                  settings.setMixedContentMode(WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
+                  webView.setWebViewClient(new WebViewClient() {
+                      @Override
+                      public void onPageFinished(WebView view, String url) {
+                          mapReady = true;
+                          loadSavedRoute();
+                      }
+                  });
+                  webView.loadUrl("file:///android_asset/map.html");
+              }
+
+              private void loadSavedRoute() {
+                  JSONArray route = routeStore.readAllJson();
+                  webView.evaluateJavascript("window.setLocations(" + route + ")", null);
+                  Cursor cursor = routeStore.latestCursor();
+                  try {
+                      if (cursor.moveToFirst()) {
+                          status.setText(String.format(Locale.US,
+                                  "Issaugota vieta: %.6f, %.6f | tikslumas apie %.0f m | %s",
+                                  cursor.getDouble(0),
+                                  cursor.getDouble(1),
+                                  cursor.getFloat(2),
+                                  readableMode(cursor.getString(4))));
+                      }
+                  } finally {
+                      cursor.close();
+                  }
+              }
+
+              private void requestNeededPermissions() {
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                      requestPermissions(new String[] {
+                              Manifest.permission.ACCESS_FINE_LOCATION,
+                              Manifest.permission.ACCESS_COARSE_LOCATION,
+                              Manifest.permission.POST_NOTIFICATIONS
+                      }, REQUEST_PERMISSIONS);
+                  } else {
+                      requestPermissions(new String[] {
+                              Manifest.permission.ACCESS_FINE_LOCATION,
+                              Manifest.permission.ACCESS_COARSE_LOCATION
+                      }, REQUEST_PERMISSIONS);
+                  }
+              }
+
+              private boolean hasLocationPermission() {
+                  return checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+                          || checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED;
+              }
+
+              private void startTracking() {
+                  try {
+                      TrackingState.setRunning(this, true);
+                      Intent intent = new Intent(this, LocationService.class);
+                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                          startForegroundService(intent);
+                      } else {
+                          startService(intent);
+                      }
+                      status.setText("Sekimas ijungtas. Marsrutas saugomas.");
+                  } catch (Exception error) {
+                      TrackingState.setRunning(this, false);
+                      status.setText("Nepavyko paleisti sekimo: " + error.getClass().getSimpleName());
+                  }
+                  refreshButton();
+              }
+
+              private void stopTracking() {
+                  TrackingState.setRunning(this, false);
+                  stopService(new Intent(this, LocationService.class));
+                  status.setText("Sekimas sustabdytas. Issaugotas marsrutas lieka zemelapyje.");
+                  refreshButton();
+              }
+
+              private void refreshButton() {
+                  boolean running = TrackingState.isRunning(this);
+                  trackingButton.setText(running ? "Stabdyti sekima" : "Pradeti sekima");
+                  trackingButton.setBackgroundColor(running ? Color.rgb(22, 163, 74) : Color.rgb(220, 38, 38));
+                  trackingButton.setTextColor(Color.WHITE);
+              }
+
+              private void showLocation(double lat, double lng, float accuracy, String mode) {
+                  status.setText(String.format(Locale.US,
+                          "Vieta: %.6f, %.6f | tikslumas apie %.0f m | %s",
+                          lat, lng, accuracy, readableMode(mode)));
+                  if (mapReady) {
+                      String js = String.format(Locale.US,
+                              "window.addLocation(%f,%f,%f,'%s')",
+                              lat, lng, accuracy, mode == null ? MovementMode.GROUND : mode);
+                      webView.evaluateJavascript(js, null);
+                  }
+              }
+
+              private void showStatistics() {
+                  new AlertDialog.Builder(this)
+                          .setTitle("Statistika")
+                          .setMessage(routeStore.statisticsText())
+                          .setPositiveButton("Gerai", null)
+                          .show();
+              }
+
+              private String readableMode(String mode) {
+                  if (MovementMode.AIR.equals(mode)) return "lektuvu";
+                  if (MovementMode.SEA.equals(mode)) return "laivu";
+                  return "zeme";
+              }
+          }
+          EOF
+
+          cat > app/src/main/java/com/example/tracker/LocationService.java <<'EOF'
+          package com.example.tracker;
+
+          import android.Manifest;
+          import android.app.Notification;
+          import android.app.NotificationChannel;
+          import android.app.NotificationManager;
+          import android.app.PendingIntent;
+          import android.app.Service;
+          import android.content.Context;
+          import android.content.Intent;
+          import android.content.pm.PackageManager;
+          import android.location.Location;
+          import android.location.LocationListener;
+          import android.location.LocationManager;
+          import android.os.Build;
+          import android.os.Bundle;
+          import android.os.IBinder;
+
+          public class LocationService extends Service implements LocationListener {
+              public static final String ACTION_LOCATION = "com.example.tracker.LOCATION";
+              public static final String EXTRA_LAT = "lat";
+              public static final String EXTRA_LNG = "lng";
+              public static final String EXTRA_ACCURACY = "accuracy";
+              public static final String EXTRA_MODE = "mode";
+              private static final String CHANNEL_ID = "tracking";
+              private static final float MAX_ACCURACY_METERS = 45f;
+              private static final float MIN_DISTANCE_METERS = 12f;
+              private static final long MIN_TIME_MS = 5000L;
+              private static final float GLITCH_SPEED_MPS = 95f;
+              private LocationManager locationManager;
+              private RouteStore routeStore;
+              private Location lastAccepted;
+              private int highSpeedStreak;
+
+              @Override
+              public void onCreate() {
+                  super.onCreate();
+                  routeStore = new RouteStore(this);
+                  locationManager = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
+                  createChannel();
+                  startForeground(1, createNotification());
+                  TrackingState.setRunning(this, true);
+                  startUpdates();
+              }
+
+              @Override
+              public int onStartCommand(Intent intent, int flags, int startId) {
+                  TrackingState.setRunning(this, true);
+                  startUpdates();
+                  return START_STICKY;
+              }
+
+              @Override
+              public void onDestroy() {
+                  if (locationManager != null) locationManager.removeUpdates(this);
+                  if (routeStore != null) routeStore.close();
+                  super.onDestroy();
+              }
+
+              @Override public IBinder onBind(Intent intent) { return null; }
+
+              @Override
+              public void onLocationChanged(Location location) {
+                  if (!shouldAccept(location)) return;
+                  String mode = classify(location);
+                  lastAccepted = new Location(location);
+                  routeStore.add(
+                          location.getLatitude(),
+                          location.getLongitude(),
+                          location.hasAccuracy() ? location.getAccuracy() : 0f,
+                          location.getTime() > 0 ? location.getTime() : System.currentTimeMillis(),
+                          location.getProvider(),
+                          mode
+                  );
+                  Intent intent = new Intent(ACTION_LOCATION);
+                  intent.setPackage(getPackageName());
+                  intent.putExtra(EXTRA_LAT, location.getLatitude());
+                  intent.putExtra(EXTRA_LNG, location.getLongitude());
+                  intent.putExtra(EXTRA_ACCURACY, location.hasAccuracy() ? location.getAccuracy() : 0f);
+                  intent.putExtra(EXTRA_MODE, mode);
+                  sendBroadcast(intent);
+              }
+
+              @Override public void onProviderEnabled(String provider) {}
+              @Override public void onProviderDisabled(String provider) {}
+              @Override public void onStatusChanged(String provider, int status, Bundle extras) {}
+
+              private void startUpdates() {
+                  if (locationManager == null || !hasLocationPermission()) {
+                      stopSelf();
+                      return;
+                  }
+                  try {
+                      locationManager.removeUpdates(this);
+                      request(LocationManager.GPS_PROVIDER);
+                      request(LocationManager.NETWORK_PROVIDER);
+                  } catch (SecurityException error) {
+                      stopSelf();
+                  }
+              }
+
+              private void request(String provider) {
+                  try {
+                      if (locationManager.isProviderEnabled(provider)) {
+                          locationManager.requestLocationUpdates(provider, MIN_TIME_MS, MIN_DISTANCE_METERS, this);
+                          Location last = locationManager.getLastKnownLocation(provider);
+                          if (last != null) onLocationChanged(last);
+                      }
+                  } catch (Exception ignored) {
+                  }
+              }
+
+              private boolean shouldAccept(Location location) {
+                  if (location == null) return false;
+                  if (location.hasAccuracy() && location.getAccuracy() > MAX_ACCURACY_METERS) return false;
+                  if (lastAccepted == null) return true;
+
+                  long dtMs = Math.max(1L, effectiveTime(location) - effectiveTime(lastAccepted));
+                  float distance = location.distanceTo(lastAccepted);
+                  float combinedAccuracy = (location.hasAccuracy() ? location.getAccuracy() : 25f)
+                          + (lastAccepted.hasAccuracy() ? lastAccepted.getAccuracy() : 25f);
+                  if (distance < Math.max(MIN_DISTANCE_METERS, combinedAccuracy * 0.75f) && dtMs < 90000L) {
+                      return false;
+                  }
+
+                  float speed = distance / (dtMs / 1000f);
+                  boolean deviceReportsAirSpeed = location.hasSpeed() && location.getSpeed() > 55f;
+                  if (speed > GLITCH_SPEED_MPS && !deviceReportsAirSpeed) {
+                      return false;
+                  }
+                  return true;
+              }
+
+              private String classify(Location location) {
+                  if (lastAccepted == null) return MovementMode.GROUND;
+                  long dtMs = Math.max(1L, effectiveTime(location) - effectiveTime(lastAccepted));
+                  float distance = location.distanceTo(lastAccepted);
+                  float calculatedSpeed = distance / (dtMs / 1000f);
+                  float speed = location.hasSpeed() ? Math.max(location.getSpeed(), calculatedSpeed) : calculatedSpeed;
+
+                  if ((speed > 55f && distance > 1200f && dtMs > 12000L) || (location.hasSpeed() && location.getSpeed() > 70f)) {
+                      highSpeedStreak++;
+                  } else {
+                      highSpeedStreak = 0;
+                  }
+                  if (highSpeedStreak >= 2) return MovementMode.AIR;
+
+                  if (speed >= 1.5f && speed <= 13f && distance > 40f && dtMs > 8000L && !LocationManager.GPS_PROVIDER.equals(location.getProvider())) {
+                      return MovementMode.SEA;
+                  }
+                  return MovementMode.GROUND;
+              }
+
+              private long effectiveTime(Location location) {
+                  return location.getTime() > 0 ? location.getTime() : System.currentTimeMillis();
+              }
+
+              private boolean hasLocationPermission() {
+                  return checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+                          || checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED;
+              }
+
+              private Notification createNotification() {
+                  Intent intent = new Intent(this, MainActivity.class);
+                  int flags = Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? PendingIntent.FLAG_IMMUTABLE : 0;
+                  PendingIntent pendingIntent = PendingIntent.getActivity(this, 0, intent, flags);
+                  Notification.Builder builder = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                          ? new Notification.Builder(this, CHANNEL_ID)
+                          : new Notification.Builder(this);
+                  return builder
+                          .setContentTitle("Tracker veikia")
+                          .setContentText("Programa nuolat saugo marsruta.")
+                          .setSmallIcon(android.R.drawable.ic_menu_mylocation)
+                          .setContentIntent(pendingIntent)
+                          .setOngoing(true)
+                          .build();
+              }
+
+              private void createChannel() {
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                      NotificationChannel channel = new NotificationChannel(
+                              CHANNEL_ID,
+                              "Tracker",
+                              NotificationManager.IMPORTANCE_LOW
+                      );
+                      NotificationManager manager = getSystemService(NotificationManager.class);
+                      if (manager != null) manager.createNotificationChannel(channel);
+                  }
+              }
+          }
+          EOF
+
+      - name: Build debug APK
+        run: gradle clean assembleDebug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Tracking-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
