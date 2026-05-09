@@ -61,8 +61,8 @@ jobs:
                   applicationId "com.example.tracker"
                   minSdk 24
                   targetSdk 34
-                  versionCode 8
-                  versionName "1.7"
+                  versionCode 9
+                  versionName "1.8"
               }
               compileOptions {
                   sourceCompatibility JavaVersion.VERSION_17
@@ -197,6 +197,9 @@ jobs:
               let zoom = 16;
               let points = [];
               let currentMode = "ground";
+              let dragging = false;
+              let dragStart = null;
+              let dragCenter = null;
 
               function valid(item) {
                   return item && Number.isFinite(Number(item.lat)) && Number.isFinite(Number(item.lng));
@@ -322,6 +325,40 @@ jobs:
                   renderTiles();
                   renderRoute();
               };
+              function eventPoint(event) {
+                  const touch = event.touches && event.touches.length ? event.touches[0] : event;
+                  return { x: touch.clientX, y: touch.clientY };
+              }
+              function startDrag(event) {
+                  if (event.target && event.target.classList && event.target.classList.contains("zoom")) return;
+                  dragging = true;
+                  dragStart = eventPoint(event);
+                  dragCenter = project(center.lat, center.lng, zoom);
+                  event.preventDefault();
+              }
+              function moveDrag(event) {
+                  if (!dragging || !dragStart || !dragCenter) return;
+                  const point = eventPoint(event);
+                  const movedCenter = {
+                      x: dragCenter.x - (point.x - dragStart.x),
+                      y: dragCenter.y - (point.y - dragStart.y)
+                  };
+                  center = unproject(movedCenter.x, movedCenter.y, zoom);
+                  renderTiles();
+                  renderRoute();
+                  event.preventDefault();
+              }
+              function endDrag() {
+                  dragging = false;
+                  dragStart = null;
+                  dragCenter = null;
+              }
+              mapEl.addEventListener("mousedown", startDrag);
+              mapEl.addEventListener("mousemove", moveDrag);
+              window.addEventListener("mouseup", endDrag);
+              mapEl.addEventListener("touchstart", startDrag, { passive: false });
+              mapEl.addEventListener("touchmove", moveDrag, { passive: false });
+              mapEl.addEventListener("touchend", endDrag);
               window.addEventListener("resize", () => { renderTiles(); renderRoute(); });
               renderTiles();
           </script>
@@ -544,7 +581,6 @@ jobs:
           import android.webkit.WebViewClient;
           import android.widget.Button;
           import android.widget.LinearLayout;
-          import android.widget.TextView;
 
           import org.json.JSONArray;
 
@@ -553,7 +589,6 @@ jobs:
           public class MainActivity extends Activity {
               private static final int REQUEST_PERMISSIONS = 100;
               private WebView webView;
-              private TextView status;
               private Button trackingButton;
               private Button groundButton;
               private Button airButton;
@@ -623,23 +658,14 @@ jobs:
                   if (requestCode == REQUEST_PERMISSIONS && hasLocationPermission()) {
                       startTracking();
                   } else {
-                      status.setText("Suteikite vietos leidimą, kad programa galėtų sekti maršrutą.");
+                      showToast("Suteikite vietos leidimą, kad programa galėtų sekti maršrutą.");
                   }
               }
 
               private void buildUi() {
                   LinearLayout root = new LinearLayout(this);
                   root.setOrientation(LinearLayout.VERTICAL);
-                  root.setPadding(dp(8), getStatusBarPadding() + dp(6), dp(8), getNavigationBarPadding() + dp(4));
-
-                  status = new TextView(this);
-                  status.setText("Tracker parengtas.");
-                  status.setTextSize(14);
-                  status.setPadding(dp(4), dp(4), dp(4), dp(6));
-                  root.addView(status, new LinearLayout.LayoutParams(
-                          LinearLayout.LayoutParams.MATCH_PARENT,
-                          LinearLayout.LayoutParams.WRAP_CONTENT
-                  ));
+                  root.setPadding(dp(4), dp(4), dp(4), dp(4));
 
                   LinearLayout actions = new LinearLayout(this);
                   actions.setOrientation(LinearLayout.HORIZONTAL);
@@ -695,7 +721,7 @@ jobs:
                       TrackingState.setManualMode(this, mode);
                       refreshModeButtons();
                       updateMapMarkerMode(mode);
-                      status.setText("Pasirinktas režimas: " + readableMode(mode));
+                      showToast("Pasirinktas režimas: " + readableMode(mode));
                   });
                   return button;
               }
@@ -721,12 +747,7 @@ jobs:
                   Cursor cursor = routeStore.latestCursor();
                   try {
                       if (cursor.moveToFirst()) {
-                          status.setText(String.format(Locale.US,
-                                  "Išsaugota vieta: %.6f, %.6f | tikslumas apie %.0f m | %s",
-                                  cursor.getDouble(0),
-                                  cursor.getDouble(1),
-                                  cursor.getFloat(2),
-                                  readableMode(cursor.getString(4))));
+                          // The saved route is shown on the map; no permanent status text is shown above controls.
                       }
                   } finally {
                       cursor.close();
@@ -762,10 +783,10 @@ jobs:
                       } else {
                           startService(intent);
                       }
-                      status.setText("Sekimas įjungtas. Maršrutas saugomas.");
+                      showToast("Sekimas įjungtas. Maršrutas saugomas.");
                   } catch (Exception error) {
                       TrackingState.setRunning(this, false);
-                      status.setText("Nepavyko paleisti sekimo: " + error.getClass().getSimpleName());
+                      showToast("Nepavyko paleisti sekimo: " + error.getClass().getSimpleName());
                   }
                   refreshButton();
               }
@@ -773,7 +794,7 @@ jobs:
               private void stopTracking() {
                   TrackingState.setRunning(this, false);
                   stopService(new Intent(this, LocationService.class));
-                  status.setText("Sekimas sustabdytas. Išsaugotas maršrutas lieka žemėlapyje.");
+                  showToast("Sekimas sustabdytas. Išsaugotas maršrutas lieka žemėlapyje.");
                   refreshButton();
               }
 
@@ -822,9 +843,6 @@ jobs:
               }
 
               private void showLocation(double lat, double lng, float accuracy, String mode) {
-                  status.setText(String.format(Locale.US,
-                          "Vieta: %.6f, %.6f | tikslumas apie %.0f m | %s",
-                          lat, lng, accuracy, readableMode(mode)));
                   if (mapReady) {
                       String js = String.format(Locale.US,
                               "window.addLocation(%f,%f,%f,'%s')",
@@ -847,14 +865,8 @@ jobs:
                   return "žeme";
               }
 
-              private int getStatusBarPadding() {
-                  int id = getResources().getIdentifier("status_bar_height", "dimen", "android");
-                  return id > 0 ? getResources().getDimensionPixelSize(id) : 0;
-              }
-
-              private int getNavigationBarPadding() {
-                  int id = getResources().getIdentifier("navigation_bar_height", "dimen", "android");
-                  return id > 0 ? getResources().getDimensionPixelSize(id) : 0;
+              private void showToast(String message) {
+                  android.widget.Toast.makeText(this, message, android.widget.Toast.LENGTH_SHORT).show();
               }
           }
           EOF
