@@ -61,8 +61,8 @@ jobs:
                   applicationId "com.example.tracker"
                   minSdk 24
                   targetSdk 34
-                  versionCode 13
-                  versionName "2.2"
+                  versionCode 14
+                  versionName "2.3"
               }
               compileOptions {
                   sourceCompatibility JavaVersion.VERSION_17
@@ -620,6 +620,7 @@ jobs:
               private float lastTouchX;
               private float lastTouchY;
               private boolean scaling;
+              private long lastZoomAt;
 
               private final BroadcastReceiver receiver = new BroadcastReceiver() {
                   @Override
@@ -775,11 +776,17 @@ jobs:
                       @Override
                       public boolean onScale(ScaleGestureDetector detector) {
                           accumulatedScale *= detector.getScaleFactor();
-                          if (accumulatedScale > 1.22f) {
+                          long now = System.currentTimeMillis();
+                          if (now - lastZoomAt < 350L) {
+                              return true;
+                          }
+                          if (accumulatedScale > 1.75f) {
                               zoomMap(1);
+                              lastZoomAt = now;
                               accumulatedScale = 1f;
-                          } else if (accumulatedScale < 0.82f) {
+                          } else if (accumulatedScale < 0.57f) {
                               zoomMap(-1);
+                              lastZoomAt = now;
                               accumulatedScale = 1f;
                           }
                           return true;
@@ -793,6 +800,9 @@ jobs:
                   });
                   webView.setOnTouchListener((view, event) -> {
                       view.getParent().requestDisallowInterceptTouchEvent(true);
+                      if (isZoomButtonTouch(event)) {
+                          return false;
+                      }
                       scaleDetector.onTouchEvent(event);
                       if (event.getPointerCount() > 1 || scaling) {
                           return true;
@@ -805,8 +815,8 @@ jobs:
                           case MotionEvent.ACTION_MOVE:
                               float dx = event.getX() - lastTouchX;
                               float dy = event.getY() - lastTouchY;
-                              if (Math.abs(dx) > 1f || Math.abs(dy) > 1f) {
-                                  panMap(dx, dy);
+                              if (Math.abs(dx) > 3f || Math.abs(dy) > 3f) {
+                                  panMap(dx * 0.45f, dy * 0.45f);
                                   lastTouchX = event.getX();
                                   lastTouchY = event.getY();
                               }
@@ -944,6 +954,20 @@ jobs:
                   if (mapReady) {
                       webView.evaluateJavascript("window.zoomBy(" + delta + ")", null);
                   }
+              }
+
+              private boolean isZoomButtonTouch(MotionEvent event) {
+                  float density = getResources().getDisplayMetrics().density;
+                  float x = event.getX();
+                  float y = event.getY();
+                  float left = 12f * density;
+                  float right = 56f * density;
+                  float topPlus = 12f * density;
+                  float bottomPlus = 56f * density;
+                  float topMinus = 62f * density;
+                  float bottomMinus = 106f * density;
+                  return x >= left && x <= right
+                          && ((y >= topPlus && y <= bottomPlus) || (y >= topMinus && y <= bottomMinus));
               }
 
               private void showLocation(double lat, double lng, float accuracy, String mode) {
