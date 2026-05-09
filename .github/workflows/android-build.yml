@@ -61,8 +61,8 @@ jobs:
                   applicationId "com.example.tracker"
                   minSdk 24
                   targetSdk 34
-                  versionCode 11
-                  versionName "2.0"
+                  versionCode 12
+                  versionName "2.1"
               }
               compileOptions {
                   sourceCompatibility JavaVersion.VERSION_17
@@ -151,7 +151,7 @@ jobs:
               <style>
                   html, body, #map { height: 100%; margin: 0; }
                   body { font-family: system-ui, sans-serif; overflow: hidden; }
-                  #map { background: #e5e7eb; position: relative; overflow: hidden; }
+                  #map { background: #e5e7eb; position: relative; overflow: hidden; touch-action: none; user-select: none; }
                   #tiles, #route, #markerLayer { inset: 0; position: absolute; }
                   #tiles img { height: 256px; position: absolute; width: 256px; }
                   #route { pointer-events: none; z-index: 5; }
@@ -336,6 +336,7 @@ jobs:
                   dragStart = eventPoint(event);
                   dragCenter = project(center.lat, center.lng, zoom);
                   event.preventDefault();
+                  return false;
               }
               function moveDrag(event) {
                   if (!dragging || !dragStart || !dragCenter) return;
@@ -348,6 +349,7 @@ jobs:
                   renderTiles();
                   renderRoute();
                   event.preventDefault();
+                  return false;
               }
               function endDrag() {
                   dragging = false;
@@ -738,6 +740,9 @@ jobs:
                   settings.setLoadWithOverviewMode(true);
                   settings.setUseWideViewPort(true);
                   settings.setMixedContentMode(WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
+                  webView.setOverScrollMode(WebView.OVER_SCROLL_NEVER);
+                  webView.setHorizontalScrollBarEnabled(false);
+                  webView.setVerticalScrollBarEnabled(false);
                   webView.setOnTouchListener((view, event) -> {
                       view.getParent().requestDisallowInterceptTouchEvent(true);
                       return false;
@@ -914,7 +919,8 @@ jobs:
               public static final String EXTRA_MODE = "mode";
               public static final String EXTRA_RELOAD = "reload";
               private static final String CHANNEL_ID = "tracking";
-              private static final float MAX_ACCURACY_METERS = 25f;
+              private static final float MAX_ACCURACY_METERS = 80f;
+              private static final float GOOD_ACCURACY_METERS = 35f;
               private static final float MIN_DISTANCE_METERS = 25f;
               private static final long MIN_TIME_MS = 6000L;
               private static final float GLITCH_SPEED_MPS = 95f;
@@ -1031,16 +1037,20 @@ jobs:
 
                   long dtMs = Math.max(1L, effectiveTime(location) - effectiveTime(lastAccepted));
                   float distance = location.distanceTo(lastAccepted);
-                  float combinedAccuracy = (location.hasAccuracy() ? location.getAccuracy() : 25f)
-                          + (lastAccepted.hasAccuracy() ? lastAccepted.getAccuracy() : 25f);
-                  if (distance < Math.max(MIN_DISTANCE_METERS, combinedAccuracy * 2.5f) && dtMs < 180000L) {
+                  float accuracy = location.hasAccuracy() ? location.getAccuracy() : GOOD_ACCURACY_METERS;
+                  float previousAccuracy = lastAccepted.hasAccuracy() ? lastAccepted.getAccuracy() : GOOD_ACCURACY_METERS;
+                  float noiseRadius = Math.max(MIN_DISTANCE_METERS, Math.max(accuracy, previousAccuracy) * 3.0f);
+                  if (distance < noiseRadius && dtMs < 300000L) {
+                      return false;
+                  }
+                  if (accuracy > GOOD_ACCURACY_METERS && distance < accuracy * 4.0f && dtMs < 600000L) {
                       return false;
                   }
 
                   float speed = distance / (dtMs / 1000f);
                   boolean deviceReportsAirSpeed = location.hasSpeed() && location.getSpeed() > 55f;
                   String manualMode = TrackingState.getManualMode(this);
-                  if (!MovementMode.AIR.equals(manualMode) && speed > 12f && dtMs < 180000L) {
+                  if (!MovementMode.AIR.equals(manualMode) && speed > 18f && dtMs < 180000L) {
                       return false;
                   }
                   if (speed > GLITCH_SPEED_MPS && !deviceReportsAirSpeed) {
