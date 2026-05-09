@@ -61,8 +61,8 @@ jobs:
                   applicationId "com.example.tracker"
                   minSdk 24
                   targetSdk 34
-                  versionCode 7
-                  versionName "1.6"
+                  versionCode 8
+                  versionName "1.7"
               }
               compileOptions {
                   sourceCompatibility JavaVersion.VERSION_17
@@ -148,10 +148,14 @@ jobs:
           <head>
               <meta charset="utf-8">
               <meta name="viewport" content="width=device-width, initial-scale=1">
-              <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
               <style>
                   html, body, #map { height: 100%; margin: 0; }
-                  body { font-family: system-ui, sans-serif; }
+                  body { font-family: system-ui, sans-serif; overflow: hidden; }
+                  #map { background: #e5e7eb; position: relative; overflow: hidden; }
+                  #tiles, #route, #markerLayer { inset: 0; position: absolute; }
+                  #tiles img { height: 256px; position: absolute; width: 256px; }
+                  #route { pointer-events: none; z-index: 5; }
+                  #markerLayer { pointer-events: none; z-index: 6; }
                   #empty {
                       align-items: center; background: #f8fafc; color: #334155;
                       display: flex; inset: 0; justify-content: center; padding: 24px;
@@ -160,61 +164,131 @@ jobs:
                   .mode-icon {
                       background: #fff; border: 2px solid #111827; border-radius: 50%;
                       box-shadow: 0 1px 6px rgba(0,0,0,.25); font-size: 18px;
-                      height: 30px; line-height: 28px; text-align: center; width: 30px;
+                      height: 30px; line-height: 28px; position: absolute; text-align: center;
+                      transform: translate(-15px, -15px); width: 30px;
                   }
+                  .zoom {
+                      background: #fff; border: 1px solid #94a3b8; border-radius: 6px;
+                      box-shadow: 0 1px 6px rgba(0,0,0,.2); color: #111827;
+                      font-size: 26px; font-weight: 700; height: 44px; left: 12px;
+                      position: absolute; width: 44px; z-index: 20;
+                  }
+                  #plus { top: 12px; }
+                  #minus { top: 62px; }
               </style>
           </head>
           <body>
-          <div id="map"></div>
+          <div id="map">
+              <div id="tiles"></div>
+              <svg id="route"></svg>
+              <div id="markerLayer"></div>
+              <button class="zoom" id="plus">+</button>
+              <button class="zoom" id="minus">−</button>
+          </div>
           <div id="empty">Laukiama GPS vietos...</div>
-          <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
           <script>
               const colors = { air: "#facc15", sea: "#2563eb", ground: "#16a34a" };
               const labels = { air: "✈", sea: "⛵", ground: "🌐" };
-              const map = L.map("map").setView([54.6872, 25.2797], 12);
-              L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-                  maxZoom: 19,
-                  attribution: "OpenStreetMap"
-              }).addTo(map);
-
+              const mapEl = document.getElementById("map");
+              const tilesEl = document.getElementById("tiles");
+              const routeEl = document.getElementById("route");
+              const markerEl = document.getElementById("markerLayer");
+              let center = { lat: 54.6872, lng: 25.2797 };
+              let zoom = 16;
               let points = [];
               let currentMode = "ground";
-              const layers = L.layerGroup().addTo(map);
 
               function valid(item) {
                   return item && Number.isFinite(Number(item.lat)) && Number.isFinite(Number(item.lng));
               }
 
-              function iconFor(mode) {
-                  return L.divIcon({
-                      className: "mode-icon",
-                      html: labels[mode] || labels.ground,
-                      iconSize: [30, 30],
-                      iconAnchor: [15, 15]
-                  });
+              function project(lat, lng, z) {
+                  const sin = Math.sin(lat * Math.PI / 180);
+                  const scale = 256 * Math.pow(2, z);
+                  return {
+                      x: (lng + 180) / 360 * scale,
+                      y: (0.5 - Math.log((1 + sin) / (1 - sin)) / (4 * Math.PI)) * scale
+                  };
+              }
+
+              function unproject(x, y, z) {
+                  const scale = 256 * Math.pow(2, z);
+                  const lng = x / scale * 360 - 180;
+                  const n = Math.PI - 2 * Math.PI * y / scale;
+                  const lat = 180 / Math.PI * Math.atan(0.5 * (Math.exp(n) - Math.exp(-n)));
+                  return { lat, lng };
+              }
+
+              function screenPoint(point) {
+                  const c = project(center.lat, center.lng, zoom);
+                  const p = project(point.lat, point.lng, zoom);
+                  return {
+                      x: mapEl.clientWidth / 2 + (p.x - c.x),
+                      y: mapEl.clientHeight / 2 + (p.y - c.y)
+                  };
+              }
+
+              function renderTiles() {
+                  const width = mapEl.clientWidth || 1;
+                  const height = mapEl.clientHeight || 1;
+                  const c = project(center.lat, center.lng, zoom);
+                  const startX = Math.floor((c.x - width / 2) / 256) - 1;
+                  const endX = Math.floor((c.x + width / 2) / 256) + 1;
+                  const startY = Math.floor((c.y - height / 2) / 256) - 1;
+                  const endY = Math.floor((c.y + height / 2) / 256) + 1;
+                  const max = Math.pow(2, zoom);
+                  tilesEl.innerHTML = "";
+                  for (let x = startX; x <= endX; x++) {
+                      for (let y = startY; y <= endY; y++) {
+                          if (y < 0 || y >= max) continue;
+                          const wrappedX = ((x % max) + max) % max;
+                          const img = document.createElement("img");
+                          img.src = `https://tile.openstreetmap.org/${zoom}/${wrappedX}/${y}.png`;
+                          img.style.left = `${x * 256 - c.x + width / 2}px`;
+                          img.style.top = `${y * 256 - c.y + height / 2}px`;
+                          tilesEl.appendChild(img);
+                      }
+                  }
+              }
+
+              function renderRoute() {
+                  routeEl.setAttribute("width", mapEl.clientWidth);
+                  routeEl.setAttribute("height", mapEl.clientHeight);
+                  routeEl.innerHTML = "";
+                  markerEl.innerHTML = "";
+                  for (let i = 1; i < points.length; i++) {
+                      const a = screenPoint(points[i - 1]);
+                      const b = screenPoint(points[i]);
+                      const mode = points[i].mode || "ground";
+                      const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+                      line.setAttribute("x1", a.x);
+                      line.setAttribute("y1", a.y);
+                      line.setAttribute("x2", b.x);
+                      line.setAttribute("y2", b.y);
+                      line.setAttribute("stroke", colors[mode] || colors.ground);
+                      line.setAttribute("stroke-width", "5");
+                      line.setAttribute("stroke-linecap", "round");
+                      routeEl.appendChild(line);
+                  }
+                  if (points.length) {
+                      const last = points[points.length - 1];
+                      const p = screenPoint(last);
+                      const marker = document.createElement("div");
+                      marker.className = "mode-icon";
+                      marker.textContent = labels[currentMode || last.mode || "ground"] || labels.ground;
+                      marker.style.left = `${p.x}px`;
+                      marker.style.top = `${p.y}px`;
+                      markerEl.appendChild(marker);
+                  }
               }
 
               function draw(fit) {
-                  layers.clearLayers();
                   if (!points.length) return;
                   document.getElementById("empty").style.display = "none";
-                  for (let i = 1; i < points.length; i++) {
-                      const previous = points[i - 1];
-                      const current = points[i];
-                      const mode = current.mode || "ground";
-                      L.polyline(
-                          [[previous.lat, previous.lng], [current.lat, current.lng]],
-                          { color: colors[mode] || colors.ground, weight: 5, opacity: 0.9 }
-                      ).addTo(layers);
-                  }
                   const last = points[points.length - 1];
-                  L.marker([last.lat, last.lng], { icon: iconFor(currentMode || last.mode || "ground") }).addTo(layers);
-                  const latLngs = points.map(p => [p.lat, p.lng]);
-                  if (fit && latLngs.length > 1) {
-                      map.fitBounds(L.latLngBounds(latLngs), { padding: [32, 32], maxZoom: 17 });
-                  } else {
-                      map.setView([last.lat, last.lng], Math.max(map.getZoom(), 16));
-                  }
+                  center = { lat: last.lat, lng: last.lng };
+                  renderTiles();
+                  renderRoute();
               }
 
               window.setLocations = function(items) {
@@ -237,6 +311,19 @@ jobs:
                   currentMode = mode || "ground";
                   draw(false);
               };
+
+              document.getElementById("plus").onclick = () => {
+                  zoom = Math.min(19, zoom + 1);
+                  renderTiles();
+                  renderRoute();
+              };
+              document.getElementById("minus").onclick = () => {
+                  zoom = Math.max(3, zoom - 1);
+                  renderTiles();
+                  renderRoute();
+              };
+              window.addEventListener("resize", () => { renderTiles(); renderRoute(); });
+              renderTiles();
           </script>
           </body>
           </html>
