@@ -60,9 +60,9 @@ jobs:
               defaultConfig {
                   applicationId "com.example.tracker"
                   minSdk 24
-                  targetSdk 35
-                  versionCode 6
-                  versionName "1.5"
+                  targetSdk 34
+                  versionCode 7
+                  versionName "1.6"
               }
               compileOptions {
                   sourceCompatibility JavaVersion.VERSION_17
@@ -429,7 +429,7 @@ jobs:
                   }
 
                   return String.format(Locale.US,
-                          "Visas kelias: %.2f km\n\n✈ Lektuvu: %.2f km\n⛵ Laivu: %.2f km\n🌐 Zeme: %.2f km",
+                          "Visas kelias: %.2f km\n\n✈ Lėktuvu: %.2f km\n⛵ Laivu: %.2f km\n🌐 Žeme: %.2f km",
                           total, air, sea, ground);
               }
           }
@@ -536,18 +536,19 @@ jobs:
                   if (requestCode == REQUEST_PERMISSIONS && hasLocationPermission()) {
                       startTracking();
                   } else {
-                      status.setText("Suteikite vietos leidima, kad programa galetu sekti marsruta.");
+                      status.setText("Suteikite vietos leidimą, kad programa galėtų sekti maršrutą.");
                   }
               }
 
               private void buildUi() {
                   LinearLayout root = new LinearLayout(this);
                   root.setOrientation(LinearLayout.VERTICAL);
+                  root.setPadding(dp(8), getStatusBarPadding() + dp(6), dp(8), getNavigationBarPadding() + dp(4));
 
                   status = new TextView(this);
                   status.setText("Tracker parengtas.");
-                  status.setTextSize(15);
-                  status.setPadding(16, 16, 16, 8);
+                  status.setTextSize(14);
+                  status.setPadding(dp(4), dp(4), dp(4), dp(6));
                   root.addView(status, new LinearLayout.LayoutParams(
                           LinearLayout.LayoutParams.MATCH_PARENT,
                           LinearLayout.LayoutParams.WRAP_CONTENT
@@ -580,8 +581,8 @@ jobs:
 
                   LinearLayout modes = new LinearLayout(this);
                   modes.setOrientation(LinearLayout.HORIZONTAL);
-                  groundButton = modeButton("Zeme", MovementMode.GROUND);
-                  airButton = modeButton("Lektuvas", MovementMode.AIR);
+                  groundButton = modeButton("Žemė", MovementMode.GROUND);
+                  airButton = modeButton("Lėktuvas", MovementMode.AIR);
                   seaButton = modeButton("Laivas", MovementMode.SEA);
                   modes.addView(groundButton, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
                   modes.addView(airButton, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
@@ -607,7 +608,7 @@ jobs:
                       TrackingState.setManualMode(this, mode);
                       refreshModeButtons();
                       updateMapMarkerMode(mode);
-                      status.setText("Pasirinktas rezimas: " + readableMode(mode));
+                      status.setText("Pasirinktas režimas: " + readableMode(mode));
                   });
                   return button;
               }
@@ -634,7 +635,7 @@ jobs:
                   try {
                       if (cursor.moveToFirst()) {
                           status.setText(String.format(Locale.US,
-                                  "Issaugota vieta: %.6f, %.6f | tikslumas apie %.0f m | %s",
+                                  "Išsaugota vieta: %.6f, %.6f | tikslumas apie %.0f m | %s",
                                   cursor.getDouble(0),
                                   cursor.getDouble(1),
                                   cursor.getFloat(2),
@@ -674,7 +675,7 @@ jobs:
                       } else {
                           startService(intent);
                       }
-                      status.setText("Sekimas ijungtas. Marsrutas saugomas.");
+                      status.setText("Sekimas įjungtas. Maršrutas saugomas.");
                   } catch (Exception error) {
                       TrackingState.setRunning(this, false);
                       status.setText("Nepavyko paleisti sekimo: " + error.getClass().getSimpleName());
@@ -685,14 +686,14 @@ jobs:
               private void stopTracking() {
                   TrackingState.setRunning(this, false);
                   stopService(new Intent(this, LocationService.class));
-                  status.setText("Sekimas sustabdytas. Issaugotas marsrutas lieka zemelapyje.");
+                  status.setText("Sekimas sustabdytas. Išsaugotas maršrutas lieka žemėlapyje.");
                   refreshButton();
               }
 
               private void refreshButton() {
                   boolean running = TrackingState.isRunning(this);
-                  trackingButton.setText(running ? "Stabdyti sekima" : "Pradeti sekima");
-                  styleButton(trackingButton, running ? Color.rgb(22, 163, 74) : Color.rgb(220, 38, 38), Color.WHITE);
+                  trackingButton.setText(running ? "Stabdyti sekimą" : "Pradėti sekimą");
+                  styleButton(trackingButton, running ? Color.rgb(220, 38, 38) : Color.rgb(22, 163, 74), Color.WHITE);
               }
 
               private void refreshModeButtons() {
@@ -754,9 +755,19 @@ jobs:
               }
 
               private String readableMode(String mode) {
-                  if (MovementMode.AIR.equals(mode)) return "lektuvu";
+                  if (MovementMode.AIR.equals(mode)) return "lėktuvu";
                   if (MovementMode.SEA.equals(mode)) return "laivu";
-                  return "zeme";
+                  return "žeme";
+              }
+
+              private int getStatusBarPadding() {
+                  int id = getResources().getIdentifier("status_bar_height", "dimen", "android");
+                  return id > 0 ? getResources().getDimensionPixelSize(id) : 0;
+              }
+
+              private int getNavigationBarPadding() {
+                  int id = getResources().getIdentifier("navigation_bar_height", "dimen", "android");
+                  return id > 0 ? getResources().getDimensionPixelSize(id) : 0;
               }
           }
           EOF
@@ -788,9 +799,9 @@ jobs:
               public static final String EXTRA_MODE = "mode";
               public static final String EXTRA_RELOAD = "reload";
               private static final String CHANNEL_ID = "tracking";
-              private static final float MAX_ACCURACY_METERS = 45f;
-              private static final float MIN_DISTANCE_METERS = 12f;
-              private static final long MIN_TIME_MS = 5000L;
+              private static final float MAX_ACCURACY_METERS = 25f;
+              private static final float MIN_DISTANCE_METERS = 25f;
+              private static final long MIN_TIME_MS = 8000L;
               private static final float GLITCH_SPEED_MPS = 95f;
               private static final float FLIGHT_GAP_DISTANCE_METERS = 250000f;
               private static final long FLIGHT_GAP_TIME_MS = 20L * 60L * 1000L;
@@ -896,12 +907,16 @@ jobs:
                   float distance = location.distanceTo(lastAccepted);
                   float combinedAccuracy = (location.hasAccuracy() ? location.getAccuracy() : 25f)
                           + (lastAccepted.hasAccuracy() ? lastAccepted.getAccuracy() : 25f);
-                  if (distance < Math.max(MIN_DISTANCE_METERS, combinedAccuracy * 0.75f) && dtMs < 90000L) {
+                  if (distance < Math.max(MIN_DISTANCE_METERS, combinedAccuracy * 2.5f) && dtMs < 180000L) {
                       return false;
                   }
 
                   float speed = distance / (dtMs / 1000f);
                   boolean deviceReportsAirSpeed = location.hasSpeed() && location.getSpeed() > 55f;
+                  String manualMode = TrackingState.getManualMode(this);
+                  if (!MovementMode.AIR.equals(manualMode) && speed > 12f && dtMs < 180000L) {
+                      return false;
+                  }
                   if (speed > GLITCH_SPEED_MPS && !deviceReportsAirSpeed) {
                       return false;
                   }
