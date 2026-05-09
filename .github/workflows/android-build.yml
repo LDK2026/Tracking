@@ -61,8 +61,8 @@ jobs:
                   applicationId "com.example.tracker"
                   minSdk 24
                   targetSdk 34
-                  versionCode 12
-                  versionName "2.1"
+                  versionCode 13
+                  versionName "2.2"
               }
               compileOptions {
                   sourceCompatibility JavaVersion.VERSION_17
@@ -254,6 +254,19 @@ jobs:
                       }
                   }
               }
+
+              window.panBy = function(dx, dy) {
+                  const c = project(center.lat, center.lng, zoom);
+                  center = unproject(c.x - Number(dx || 0), c.y - Number(dy || 0), zoom);
+                  renderTiles();
+                  renderRoute();
+              };
+
+              window.zoomBy = function(delta) {
+                  zoom = Math.max(3, Math.min(19, zoom + Number(delta || 0)));
+                  renderTiles();
+                  renderRoute();
+              };
 
               function renderRoute() {
                   routeEl.setAttribute("width", mapEl.clientWidth);
@@ -581,6 +594,8 @@ jobs:
           import android.graphics.drawable.GradientDrawable;
           import android.os.Build;
           import android.os.Bundle;
+          import android.view.MotionEvent;
+          import android.view.ScaleGestureDetector;
           import android.webkit.WebSettings;
           import android.webkit.WebView;
           import android.webkit.WebViewClient;
@@ -601,6 +616,10 @@ jobs:
               private RouteStore routeStore;
               private boolean mapReady;
               private final int burgundy = Color.rgb(109, 18, 48);
+              private ScaleGestureDetector scaleDetector;
+              private float lastTouchX;
+              private float lastTouchY;
+              private boolean scaling;
 
               private final BroadcastReceiver receiver = new BroadcastReceiver() {
                   @Override
@@ -743,9 +762,61 @@ jobs:
                   webView.setOverScrollMode(WebView.OVER_SCROLL_NEVER);
                   webView.setHorizontalScrollBarEnabled(false);
                   webView.setVerticalScrollBarEnabled(false);
+                  scaleDetector = new ScaleGestureDetector(this, new ScaleGestureDetector.SimpleOnScaleGestureListener() {
+                      private float accumulatedScale = 1f;
+
+                      @Override
+                      public boolean onScaleBegin(ScaleGestureDetector detector) {
+                          scaling = true;
+                          accumulatedScale = 1f;
+                          return true;
+                      }
+
+                      @Override
+                      public boolean onScale(ScaleGestureDetector detector) {
+                          accumulatedScale *= detector.getScaleFactor();
+                          if (accumulatedScale > 1.22f) {
+                              zoomMap(1);
+                              accumulatedScale = 1f;
+                          } else if (accumulatedScale < 0.82f) {
+                              zoomMap(-1);
+                              accumulatedScale = 1f;
+                          }
+                          return true;
+                      }
+
+                      @Override
+                      public void onScaleEnd(ScaleGestureDetector detector) {
+                          scaling = false;
+                          accumulatedScale = 1f;
+                      }
+                  });
                   webView.setOnTouchListener((view, event) -> {
                       view.getParent().requestDisallowInterceptTouchEvent(true);
-                      return false;
+                      scaleDetector.onTouchEvent(event);
+                      if (event.getPointerCount() > 1 || scaling) {
+                          return true;
+                      }
+                      switch (event.getActionMasked()) {
+                          case MotionEvent.ACTION_DOWN:
+                              lastTouchX = event.getX();
+                              lastTouchY = event.getY();
+                              return true;
+                          case MotionEvent.ACTION_MOVE:
+                              float dx = event.getX() - lastTouchX;
+                              float dy = event.getY() - lastTouchY;
+                              if (Math.abs(dx) > 1f || Math.abs(dy) > 1f) {
+                                  panMap(dx, dy);
+                                  lastTouchX = event.getX();
+                                  lastTouchY = event.getY();
+                              }
+                              return true;
+                          case MotionEvent.ACTION_UP:
+                          case MotionEvent.ACTION_CANCEL:
+                              return true;
+                          default:
+                              return false;
+                      }
                   });
                   webView.setWebViewClient(new WebViewClient() {
                       @Override
@@ -860,6 +931,18 @@ jobs:
                   if (mapReady) {
                       String safeMode = mode == null ? MovementMode.GROUND : mode;
                       webView.evaluateJavascript("window.setCurrentMode('" + safeMode + "')", null);
+                  }
+              }
+
+              private void panMap(float dx, float dy) {
+                  if (mapReady) {
+                      webView.evaluateJavascript(String.format(Locale.US, "window.panBy(%f,%f)", dx, dy), null);
+                  }
+              }
+
+              private void zoomMap(int delta) {
+                  if (mapReady) {
+                      webView.evaluateJavascript("window.zoomBy(" + delta + ")", null);
                   }
               }
 
