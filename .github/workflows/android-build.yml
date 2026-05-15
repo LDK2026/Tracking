@@ -31,7 +31,7 @@ jobs:
         shell: bash
         run: |
           rm -rf app
-          mkdir -p app/src/main/java/com/example/tracker app/src/main/assets app/src/main/res/values app/src/main/res/drawable app/src/main/res/mipmap-anydpi-v26
+          mkdir -p app/src/main/java/com/example/tracker app/src/main/res/values app/src/main/res/drawable
 
           cat > settings.gradle <<'EOF'
           pluginManagement {
@@ -61,13 +61,17 @@ jobs:
                   applicationId "com.example.tracker"
                   minSdk 24
                   targetSdk 34
-                  versionCode 14
-                  versionName "2.3"
+                  versionCode 15
+                  versionName "3.0"
               }
               compileOptions {
                   sourceCompatibility JavaVersion.VERSION_17
                   targetCompatibility JavaVersion.VERSION_17
               }
+          }
+
+          dependencies {
+              implementation "org.maplibre.gl:android-sdk:13.1.0"
           }
           EOF
 
@@ -76,11 +80,27 @@ jobs:
           <resources>
               <style name="AppTheme" parent="android:style/Theme.Material.Light.NoActionBar">
                   <item name="android:fontFamily">sans</item>
-                  <item name="android:colorAccent">#0f766e</item>
                   <item name="android:windowLightStatusBar">true</item>
                   <item name="android:navigationBarColor">#ffffff</item>
+                  <item name="android:colorAccent">#6d1230</item>
               </style>
           </resources>
+          EOF
+
+          cat > app/src/main/res/drawable/ic_launcher.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="108dp"
+              android:height="108dp"
+              android:viewportWidth="108"
+              android:viewportHeight="108">
+              <path android:fillColor="#6d1230" android:pathData="M0,0 L108,0 L108,108 L0,108 Z" />
+              <path android:fillColor="#f8fafc" android:pathData="M14,14 L94,14 L94,94 L14,94 Z" />
+              <path android:fillColor="#16a34a" android:pathData="M22,22 L86,22 L86,86 L22,86 Z" />
+              <path android:fillColor="#2563eb" android:pathData="M22,66 L39,54 L53,60 L72,45 L88,52 L88,86 L22,86 Z" />
+              <path android:fillColor="#facc15" android:pathData="M73,20 L83,30 L64,44 L75,66 L66,74 L51,54 L34,65 L27,58 L43,43 L31,27 L39,20 L57,34 Z" />
+              <path android:fillColor="#6d1230" android:pathData="M48,45 L60,45 L60,57 L48,57 Z" />
+          </vector>
           EOF
 
           cat > app/src/main/AndroidManifest.xml <<'EOF'
@@ -93,14 +113,17 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
               <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
               <uses-permission android:name="android.permission.INTERNET" />
+
               <application
                   android:allowBackup="true"
+                  android:icon="@drawable/ic_launcher"
+                  android:roundIcon="@drawable/ic_launcher"
                   android:label="Tracker"
                   android:supportsRtl="true"
-                  android:theme="@style/AppTheme"
-                  android:icon="@drawable/ic_launcher"
-                  android:roundIcon="@drawable/ic_launcher">
-                  <activity android:name=".MainActivity" android:exported="true">
+                  android:theme="@style/AppTheme">
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
                           <category android:name="android.intent.category.LAUNCHER" />
@@ -114,274 +137,15 @@ jobs:
           </manifest>
           EOF
 
-          cat > app/src/main/res/drawable/ic_launcher.xml <<'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <vector xmlns:android="http://schemas.android.com/apk/res/android"
-              android:width="108dp"
-              android:height="108dp"
-              android:viewportWidth="108"
-              android:viewportHeight="108">
-              <path
-                  android:fillColor="#6d1230"
-                  android:pathData="M0,0 L108,0 L108,108 L0,108 Z" />
-              <path
-                  android:fillColor="#f8fafc"
-                  android:pathData="M14,14 L94,14 L94,94 L14,94 Z" />
-              <path
-                  android:fillColor="#16a34a"
-                  android:pathData="M22,22 L86,22 L86,86 L22,86 Z" />
-              <path
-                  android:fillColor="#2563eb"
-                  android:pathData="M22,66 L39,54 L53,60 L72,45 L88,52 L88,86 L22,86 Z" />
-              <path
-                  android:fillColor="#facc15"
-                  android:pathData="M73,20 L83,30 L64,44 L75,66 L66,74 L51,54 L34,65 L27,58 L43,43 L31,27 L39,20 L57,34 Z" />
-              <path
-                  android:fillColor="#6d1230"
-                  android:pathData="M48,45 L60,45 L60,57 L48,57 Z" />
-          </vector>
-          EOF
+          cat > app/src/main/java/com/example/tracker/MovementMode.java <<'EOF'
+          package com.example.tracker;
 
-          cat > app/src/main/assets/map.html <<'EOF'
-          <!doctype html>
-          <html>
-          <head>
-              <meta charset="utf-8">
-              <meta name="viewport" content="width=device-width, initial-scale=1">
-              <style>
-                  html, body, #map { height: 100%; margin: 0; }
-                  body { font-family: system-ui, sans-serif; overflow: hidden; }
-                  #map { background: #e5e7eb; position: relative; overflow: hidden; touch-action: none; user-select: none; }
-                  #tiles, #route, #markerLayer { inset: 0; position: absolute; }
-                  #tiles img { height: 256px; position: absolute; width: 256px; }
-                  #route { pointer-events: none; z-index: 5; }
-                  #markerLayer { pointer-events: none; z-index: 6; }
-                  #empty {
-                      background: rgba(255,255,255,.88); border: 1px solid #cbd5e1;
-                      border-radius: 10px; color: #334155; font-size: 14px;
-                      left: 50%; padding: 8px 12px; position: absolute; text-align: center;
-                      top: 12px; transform: translateX(-50%); z-index: 500;
-                  }
-                  .mode-icon {
-                      background: #fff; border: 2px solid #111827; border-radius: 50%;
-                      box-shadow: 0 1px 6px rgba(0,0,0,.25); font-size: 18px;
-                      height: 30px; line-height: 28px; position: absolute; text-align: center;
-                      transform: translate(-15px, -15px); width: 30px;
-                  }
-                  .zoom {
-                      background: #fff; border: 1px solid #94a3b8; border-radius: 6px;
-                      box-shadow: 0 1px 6px rgba(0,0,0,.2); color: #111827;
-                      font-size: 26px; font-weight: 700; height: 44px; left: 12px;
-                      position: absolute; width: 44px; z-index: 20;
-                  }
-                  #plus { top: 12px; }
-                  #minus { top: 62px; }
-              </style>
-          </head>
-          <body>
-          <div id="map">
-              <div id="tiles"></div>
-              <svg id="route"></svg>
-              <div id="markerLayer"></div>
-              <button class="zoom" id="plus">+</button>
-              <button class="zoom" id="minus">−</button>
-          </div>
-          <div id="empty">Laukiama GPS vietos...</div>
-          <script>
-              const colors = { air: "#facc15", sea: "#2563eb", ground: "#16a34a" };
-              const labels = { air: "✈", sea: "⛵", ground: "🌐" };
-              const mapEl = document.getElementById("map");
-              const tilesEl = document.getElementById("tiles");
-              const routeEl = document.getElementById("route");
-              const markerEl = document.getElementById("markerLayer");
-              let center = { lat: 54.6872, lng: 25.2797 };
-              let zoom = 14;
-              let points = [];
-              let currentMode = "ground";
-              let dragging = false;
-              let dragStart = null;
-              let dragCenter = null;
-
-              function valid(item) {
-                  return item && Number.isFinite(Number(item.lat)) && Number.isFinite(Number(item.lng));
-              }
-
-              function project(lat, lng, z) {
-                  const sin = Math.sin(lat * Math.PI / 180);
-                  const scale = 256 * Math.pow(2, z);
-                  return {
-                      x: (lng + 180) / 360 * scale,
-                      y: (0.5 - Math.log((1 + sin) / (1 - sin)) / (4 * Math.PI)) * scale
-                  };
-              }
-
-              function unproject(x, y, z) {
-                  const scale = 256 * Math.pow(2, z);
-                  const lng = x / scale * 360 - 180;
-                  const n = Math.PI - 2 * Math.PI * y / scale;
-                  const lat = 180 / Math.PI * Math.atan(0.5 * (Math.exp(n) - Math.exp(-n)));
-                  return { lat, lng };
-              }
-
-              function screenPoint(point) {
-                  const c = project(center.lat, center.lng, zoom);
-                  const p = project(point.lat, point.lng, zoom);
-                  return {
-                      x: mapEl.clientWidth / 2 + (p.x - c.x),
-                      y: mapEl.clientHeight / 2 + (p.y - c.y)
-                  };
-              }
-
-              function renderTiles() {
-                  const width = mapEl.clientWidth || 1;
-                  const height = mapEl.clientHeight || 1;
-                  const c = project(center.lat, center.lng, zoom);
-                  const startX = Math.floor((c.x - width / 2) / 256) - 1;
-                  const endX = Math.floor((c.x + width / 2) / 256) + 1;
-                  const startY = Math.floor((c.y - height / 2) / 256) - 1;
-                  const endY = Math.floor((c.y + height / 2) / 256) + 1;
-                  const max = Math.pow(2, zoom);
-                  tilesEl.innerHTML = "";
-                  for (let x = startX; x <= endX; x++) {
-                      for (let y = startY; y <= endY; y++) {
-                          if (y < 0 || y >= max) continue;
-                          const wrappedX = ((x % max) + max) % max;
-                          const img = document.createElement("img");
-                          img.src = `https://tile.openstreetmap.org/${zoom}/${wrappedX}/${y}.png`;
-                          img.style.left = `${x * 256 - c.x + width / 2}px`;
-                          img.style.top = `${y * 256 - c.y + height / 2}px`;
-                          tilesEl.appendChild(img);
-                      }
-                  }
-              }
-
-              window.panBy = function(dx, dy) {
-                  const c = project(center.lat, center.lng, zoom);
-                  center = unproject(c.x - Number(dx || 0), c.y - Number(dy || 0), zoom);
-                  renderTiles();
-                  renderRoute();
-              };
-
-              window.zoomBy = function(delta) {
-                  zoom = Math.max(3, Math.min(19, zoom + Number(delta || 0)));
-                  renderTiles();
-                  renderRoute();
-              };
-
-              function renderRoute() {
-                  routeEl.setAttribute("width", mapEl.clientWidth);
-                  routeEl.setAttribute("height", mapEl.clientHeight);
-                  routeEl.innerHTML = "";
-                  markerEl.innerHTML = "";
-                  for (let i = 1; i < points.length; i++) {
-                      const a = screenPoint(points[i - 1]);
-                      const b = screenPoint(points[i]);
-                      const mode = points[i].mode || "ground";
-                      const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
-                      line.setAttribute("x1", a.x);
-                      line.setAttribute("y1", a.y);
-                      line.setAttribute("x2", b.x);
-                      line.setAttribute("y2", b.y);
-                      line.setAttribute("stroke", colors[mode] || colors.ground);
-                      line.setAttribute("stroke-width", "5");
-                      line.setAttribute("stroke-linecap", "round");
-                      routeEl.appendChild(line);
-                  }
-                  if (points.length) {
-                      const last = points[points.length - 1];
-                      const p = screenPoint(last);
-                      const marker = document.createElement("div");
-                      marker.className = "mode-icon";
-                      marker.textContent = labels[currentMode || last.mode || "ground"] || labels.ground;
-                      marker.style.left = `${p.x}px`;
-                      marker.style.top = `${p.y}px`;
-                      markerEl.appendChild(marker);
-                  }
-              }
-
-              function draw(fit) {
-                  if (!points.length) return;
-                  document.getElementById("empty").style.display = "none";
-                  const last = points[points.length - 1];
-                  if (fit || !dragging) center = { lat: last.lat, lng: last.lng };
-                  renderTiles();
-                  renderRoute();
-              }
-
-              window.setLocations = function(items) {
-                  points = (items || []).filter(valid).map(item => ({
-                      lat: Number(item.lat),
-                      lng: Number(item.lng),
-                      mode: item.mode || "ground"
-                  }));
-                  draw(true);
-              };
-
-              window.addLocation = function(lat, lng, accuracy, mode) {
-                  lat = Number(lat); lng = Number(lng);
-                  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
-                  points.push({ lat, lng, mode: mode || "ground" });
-                  draw(false);
-              };
-
-              window.setCurrentMode = function(mode) {
-                  currentMode = mode || "ground";
-                  draw(false);
-              };
-
-              document.getElementById("plus").onclick = () => {
-                  zoom = Math.min(19, zoom + 1);
-                  renderTiles();
-                  renderRoute();
-              };
-              document.getElementById("minus").onclick = () => {
-                  zoom = Math.max(3, zoom - 1);
-                  renderTiles();
-                  renderRoute();
-              };
-              function eventPoint(event) {
-                  const touch = event.touches && event.touches.length ? event.touches[0] : event;
-                  return { x: touch.clientX, y: touch.clientY };
-              }
-              function startDrag(event) {
-                  if (event.target && event.target.classList && event.target.classList.contains("zoom")) return;
-                  dragging = true;
-                  dragStart = eventPoint(event);
-                  dragCenter = project(center.lat, center.lng, zoom);
-                  event.preventDefault();
-                  return false;
-              }
-              function moveDrag(event) {
-                  if (!dragging || !dragStart || !dragCenter) return;
-                  const point = eventPoint(event);
-                  const movedCenter = {
-                      x: dragCenter.x - (point.x - dragStart.x),
-                      y: dragCenter.y - (point.y - dragStart.y)
-                  };
-                  center = unproject(movedCenter.x, movedCenter.y, zoom);
-                  renderTiles();
-                  renderRoute();
-                  event.preventDefault();
-                  return false;
-              }
-              function endDrag() {
-                  dragging = false;
-                  dragStart = null;
-                  dragCenter = null;
-              }
-              mapEl.addEventListener("mousedown", startDrag);
-              mapEl.addEventListener("mousemove", moveDrag);
-              window.addEventListener("mouseup", endDrag);
-              mapEl.addEventListener("touchstart", startDrag, { passive: false });
-              mapEl.addEventListener("touchmove", moveDrag, { passive: false });
-              mapEl.addEventListener("touchcancel", endDrag);
-              mapEl.addEventListener("touchend", endDrag);
-              window.addEventListener("resize", () => { renderTiles(); renderRoute(); });
-              setTimeout(() => { renderTiles(); renderRoute(); }, 50);
-              setTimeout(() => { renderTiles(); renderRoute(); }, 500);
-          </script>
-          </body>
-          </html>
+          final class MovementMode {
+              static final String AIR = "air";
+              static final String SEA = "sea";
+              static final String GROUND = "ground";
+              private MovementMode() {}
+          }
           EOF
 
           cat > app/src/main/java/com/example/tracker/TrackingState.java <<'EOF'
@@ -394,34 +158,27 @@ jobs:
               private static final String PREFS = "tracking_state";
               private static final String RUNNING = "running";
               private static final String MANUAL_MODE = "manual_mode";
+
               private TrackingState() {}
+
               static boolean isRunning(Context context) {
                   return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(RUNNING, false);
               }
+
               static void setRunning(Context context, boolean running) {
-                  SharedPreferences.Editor editor = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit();
-                  editor.putBoolean(RUNNING, running);
-                  editor.apply();
+                  context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(RUNNING, running).apply();
               }
+
               static String getManualMode(Context context) {
                   return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(MANUAL_MODE, MovementMode.GROUND);
               }
+
               static void setManualMode(Context context, String mode) {
-                  SharedPreferences.Editor editor = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit();
-                  editor.putString(MANUAL_MODE, mode == null ? MovementMode.GROUND : mode);
-                  editor.apply();
+                  context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                          .edit()
+                          .putString(MANUAL_MODE, mode == null ? MovementMode.GROUND : mode)
+                          .apply();
               }
-          }
-          EOF
-
-          cat > app/src/main/java/com/example/tracker/MovementMode.java <<'EOF'
-          package com.example.tracker;
-
-          final class MovementMode {
-              static final String AIR = "air";
-              static final String SEA = "sea";
-              static final String GROUND = "ground";
-              private MovementMode() {}
           }
           EOF
 
@@ -435,12 +192,27 @@ jobs:
           import android.database.sqlite.SQLiteOpenHelper;
           import android.location.Location;
 
-          import org.json.JSONArray;
-          import org.json.JSONObject;
-
+          import java.util.ArrayList;
+          import java.util.List;
           import java.util.Locale;
 
           final class RouteStore extends SQLiteOpenHelper {
+              static final class Point {
+                  final double lat;
+                  final double lng;
+                  final float accuracy;
+                  final long time;
+                  final String mode;
+
+                  Point(double lat, double lng, float accuracy, long time, String mode) {
+                      this.lat = lat;
+                      this.lng = lng;
+                      this.accuracy = accuracy;
+                      this.time = time;
+                      this.mode = mode == null ? MovementMode.GROUND : mode;
+                  }
+              }
+
               private static final String DB_NAME = "route.db";
               private static final int DB_VERSION = 2;
               private static final String TABLE = "points";
@@ -479,48 +251,40 @@ jobs:
                   getWritableDatabase().insert(TABLE, null, values);
               }
 
-              synchronized JSONArray readAllJson() {
-                  JSONArray array = new JSONArray();
+              synchronized List<Point> readAll() {
+                  ArrayList<Point> points = new ArrayList<>();
                   Cursor cursor = getReadableDatabase().query(
                           TABLE,
-                          new String[]{"lat", "lng", "accuracy", "time", "provider", "mode"},
+                          new String[]{"lat", "lng", "accuracy", "time", "mode"},
                           null, null, null, null,
                           "time ASC, id ASC"
                   );
                   try {
                       while (cursor.moveToNext()) {
-                          JSONObject item = new JSONObject();
-                          item.put("lat", cursor.getDouble(0));
-                          item.put("lng", cursor.getDouble(1));
-                          item.put("accuracy", cursor.getFloat(2));
-                          item.put("time", cursor.getLong(3));
-                          item.put("provider", cursor.getString(4));
-                          item.put("mode", cursor.getString(5));
-                          array.put(item);
+                          points.add(new Point(
+                                  cursor.getDouble(0),
+                                  cursor.getDouble(1),
+                                  cursor.getFloat(2),
+                                  cursor.getLong(3),
+                                  cursor.getString(4)
+                          ));
                       }
-                  } catch (Exception ignored) {
                   } finally {
                       cursor.close();
                   }
-                  return array;
+                  return points;
               }
 
-              synchronized Cursor latestCursor() {
-                  return getReadableDatabase().query(
+              synchronized Location latestLocation() {
+                  Cursor cursor = getReadableDatabase().query(
                           TABLE,
-                          new String[]{"lat", "lng", "accuracy", "time", "mode"},
+                          new String[]{"lat", "lng", "accuracy", "time"},
                           null, null, null, null,
                           "time DESC, id DESC",
                           "1"
                   );
-              }
-
-              synchronized Location latestLocation() {
-                  Cursor cursor = latestCursor();
                   try {
-                      if (!cursor.moveToFirst()) {
-                          return null;
-                      }
+                      if (!cursor.moveToFirst()) return null;
                       Location location = new Location("db");
                       location.setLatitude(cursor.getDouble(0));
                       location.setLongitude(cursor.getDouble(1));
@@ -538,36 +302,23 @@ jobs:
                   double sea = 0;
                   double ground = 0;
                   Location previous = null;
-                  String previousMode = MovementMode.GROUND;
 
-                  Cursor cursor = getReadableDatabase().query(
-                          TABLE,
-                          new String[]{"lat", "lng", "mode"},
-                          null, null, null, null,
-                          "time ASC, id ASC"
-                  );
-                  try {
-                      while (cursor.moveToNext()) {
-                          Location current = new Location("db");
-                          current.setLatitude(cursor.getDouble(0));
-                          current.setLongitude(cursor.getDouble(1));
-                          String mode = cursor.getString(2);
-                          if (previous != null) {
-                              double km = previous.distanceTo(current) / 1000.0;
-                              total += km;
-                              if (MovementMode.AIR.equals(mode)) {
-                                  air += km;
-                              } else if (MovementMode.SEA.equals(mode)) {
-                                  sea += km;
-                              } else {
-                                  ground += km;
-                              }
+                  for (Point point : readAll()) {
+                      Location current = new Location("db");
+                      current.setLatitude(point.lat);
+                      current.setLongitude(point.lng);
+                      if (previous != null) {
+                          double km = previous.distanceTo(current) / 1000.0;
+                          total += km;
+                          if (MovementMode.AIR.equals(point.mode)) {
+                              air += km;
+                          } else if (MovementMode.SEA.equals(point.mode)) {
+                              sea += km;
+                          } else {
+                              ground += km;
                           }
-                          previous = current;
-                          previousMode = mode;
                       }
-                  } finally {
-                      cursor.close();
+                      previous = current;
                   }
 
                   return String.format(Locale.US,
@@ -588,39 +339,57 @@ jobs:
           import android.content.Intent;
           import android.content.IntentFilter;
           import android.content.pm.PackageManager;
-          import android.database.Cursor;
+          import android.graphics.Bitmap;
+          import android.graphics.Canvas;
           import android.graphics.Color;
+          import android.graphics.Paint;
           import android.graphics.Typeface;
           import android.graphics.drawable.GradientDrawable;
           import android.os.Build;
           import android.os.Bundle;
-          import android.view.MotionEvent;
-          import android.view.ScaleGestureDetector;
-          import android.webkit.WebSettings;
-          import android.webkit.WebView;
-          import android.webkit.WebViewClient;
+          import android.view.Gravity;
           import android.widget.Button;
+          import android.widget.FrameLayout;
           import android.widget.LinearLayout;
+          import android.widget.Toast;
 
-          import org.json.JSONArray;
+          import org.maplibre.android.MapLibre;
+          import org.maplibre.android.annotations.Icon;
+          import org.maplibre.android.annotations.IconFactory;
+          import org.maplibre.android.annotations.Marker;
+          import org.maplibre.android.annotations.MarkerOptions;
+          import org.maplibre.android.annotations.Polyline;
+          import org.maplibre.android.annotations.PolylineOptions;
+          import org.maplibre.android.camera.CameraUpdateFactory;
+          import org.maplibre.android.geometry.LatLng;
+          import org.maplibre.android.geometry.LatLngBounds;
+          import org.maplibre.android.maps.MapLibreMap;
+          import org.maplibre.android.maps.MapView;
+          import org.maplibre.android.maps.Style;
 
+          import java.util.ArrayList;
+          import java.util.List;
           import java.util.Locale;
 
           public class MainActivity extends Activity {
               private static final int REQUEST_PERMISSIONS = 100;
-              private WebView webView;
+              private static final String STYLE_JSON = "{"
+                      + "\"version\":8,"
+                      + "\"sources\":{\"osm\":{\"type\":\"raster\",\"tiles\":[\"https://tile.openstreetmap.org/{z}/{x}/{y}.png\"],\"tileSize\":256,\"attribution\":\"OpenStreetMap\"}},"
+                      + "\"layers\":[{\"id\":\"osm\",\"type\":\"raster\",\"source\":\"osm\"}]"
+                      + "}";
+
+              private final int burgundy = Color.rgb(109, 18, 48);
+              private MapView mapView;
+              private MapLibreMap map;
+              private RouteStore routeStore;
               private Button trackingButton;
               private Button groundButton;
               private Button airButton;
               private Button seaButton;
-              private RouteStore routeStore;
-              private boolean mapReady;
-              private final int burgundy = Color.rgb(109, 18, 48);
-              private ScaleGestureDetector scaleDetector;
-              private float lastTouchX;
-              private float lastTouchY;
-              private boolean scaling;
-              private long lastZoomAt;
+              private Marker marker;
+              private RouteStore.Point lastUiPoint;
+              private final List<Polyline> routeLines = new ArrayList<>();
 
               private final BroadcastReceiver receiver = new BroadcastReceiver() {
                   @Override
@@ -630,11 +399,10 @@ jobs:
                       float accuracy = intent.getFloatExtra(LocationService.EXTRA_ACCURACY, 0f);
                       String mode = intent.getStringExtra(LocationService.EXTRA_MODE);
                       if (intent.getBooleanExtra(LocationService.EXTRA_RELOAD, false)) {
-                          loadSavedRoute();
-                      } else if (Double.isNaN(lat) || Double.isNaN(lng)) {
-                          showGpsWaiting();
-                      } else {
-                          showLocation(lat, lng, accuracy, mode);
+                          loadSavedRoute(true);
+                      } else if (!Double.isNaN(lat) && !Double.isNaN(lng)) {
+                          RouteStore.Point point = new RouteStore.Point(lat, lng, accuracy, System.currentTimeMillis(), mode);
+                          addPointToMap(point, true, true);
                       }
                   }
               };
@@ -642,11 +410,9 @@ jobs:
               @Override
               protected void onCreate(Bundle savedInstanceState) {
                   super.onCreate(savedInstanceState);
+                  MapLibre.getInstance(this);
                   routeStore = new RouteStore(this);
-                  buildUi();
-                  setupMap();
-                  refreshButton();
-                  refreshModeButtons();
+                  buildUi(savedInstanceState);
                   if (!hasLocationPermission()) {
                       requestNeededPermissions();
                   } else if (TrackingState.isRunning(this)) {
@@ -657,6 +423,7 @@ jobs:
               @Override
               protected void onStart() {
                   super.onStart();
+                  mapView.onStart();
                   IntentFilter filter = new IntentFilter(LocationService.ACTION_LOCATION);
                   if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                       registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED);
@@ -668,15 +435,41 @@ jobs:
               }
 
               @Override
+              protected void onResume() {
+                  super.onResume();
+                  mapView.onResume();
+              }
+
+              @Override
+              protected void onPause() {
+                  mapView.onPause();
+                  super.onPause();
+              }
+
+              @Override
               protected void onStop() {
                   unregisterReceiver(receiver);
+                  mapView.onStop();
                   super.onStop();
               }
 
               @Override
               protected void onDestroy() {
+                  mapView.onDestroy();
                   routeStore.close();
                   super.onDestroy();
+              }
+
+              @Override
+              public void onLowMemory() {
+                  super.onLowMemory();
+                  mapView.onLowMemory();
+              }
+
+              @Override
+              protected void onSaveInstanceState(Bundle outState) {
+                  super.onSaveInstanceState(outState);
+                  mapView.onSaveInstanceState(outState);
               }
 
               @Override
@@ -689,14 +482,22 @@ jobs:
                   }
               }
 
-              private void buildUi() {
-                  LinearLayout root = new LinearLayout(this);
-                  root.setOrientation(LinearLayout.VERTICAL);
-                  root.setPadding(dp(4), dp(4), dp(4), dp(4));
+              private void buildUi(Bundle savedInstanceState) {
+                  FrameLayout root = new FrameLayout(this);
+                  mapView = new MapView(this);
+                  mapView.onCreate(savedInstanceState);
+                  root.addView(mapView, new FrameLayout.LayoutParams(
+                          FrameLayout.LayoutParams.MATCH_PARENT,
+                          FrameLayout.LayoutParams.MATCH_PARENT
+                  ));
+
+                  LinearLayout panel = new LinearLayout(this);
+                  panel.setOrientation(LinearLayout.VERTICAL);
+                  panel.setPadding(dp(6), dp(6), dp(6), dp(6));
+                  panel.setBackgroundColor(Color.argb(222, 255, 255, 255));
 
                   LinearLayout actions = new LinearLayout(this);
                   actions.setOrientation(LinearLayout.HORIZONTAL);
-
                   trackingButton = new Button(this);
                   trackingButton.setOnClickListener(v -> {
                       if (TrackingState.isRunning(this)) {
@@ -714,10 +515,7 @@ jobs:
                   styleButton(statsButton, Color.rgb(250, 204, 21), Color.rgb(17, 24, 39));
                   statsButton.setOnClickListener(v -> showStatistics());
                   actions.addView(statsButton, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
-                  root.addView(actions, new LinearLayout.LayoutParams(
-                          LinearLayout.LayoutParams.MATCH_PARENT,
-                          LinearLayout.LayoutParams.WRAP_CONTENT
-                  ));
+                  panel.addView(actions);
 
                   LinearLayout modes = new LinearLayout(this);
                   modes.setOrientation(LinearLayout.HORIZONTAL);
@@ -727,18 +525,51 @@ jobs:
                   modes.addView(groundButton, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
                   modes.addView(airButton, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
                   modes.addView(seaButton, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
-                  root.addView(modes, new LinearLayout.LayoutParams(
-                          LinearLayout.LayoutParams.MATCH_PARENT,
-                          LinearLayout.LayoutParams.WRAP_CONTENT
-                  ));
+                  panel.addView(modes);
 
-                  webView = new WebView(this);
-                  root.addView(webView, new LinearLayout.LayoutParams(
-                          LinearLayout.LayoutParams.MATCH_PARENT,
-                          0,
-                          1
-                  ));
+                  FrameLayout.LayoutParams panelParams = new FrameLayout.LayoutParams(
+                          FrameLayout.LayoutParams.MATCH_PARENT,
+                          FrameLayout.LayoutParams.WRAP_CONTENT,
+                          Gravity.TOP
+                  );
+                  root.addView(panel, panelParams);
+
+                  LinearLayout mapTools = new LinearLayout(this);
+                  mapTools.setOrientation(LinearLayout.VERTICAL);
+                  Button locateButton = compactButton("⌖");
+                  locateButton.setOnClickListener(v -> centerOnLast());
+                  Button fitButton = compactButton("□");
+                  fitButton.setOnClickListener(v -> fitRoute());
+                  mapTools.addView(locateButton);
+                  mapTools.addView(fitButton);
+                  FrameLayout.LayoutParams toolParams = new FrameLayout.LayoutParams(
+                          dp(54),
+                          FrameLayout.LayoutParams.WRAP_CONTENT,
+                          Gravity.RIGHT | Gravity.BOTTOM
+                  );
+                  toolParams.setMargins(0, 0, dp(12), dp(22));
+                  root.addView(mapTools, toolParams);
+
                   setContentView(root);
+                  refreshButton();
+                  refreshModeButtons();
+
+                  mapView.getMapAsync(mapLibreMap -> {
+                      map = mapLibreMap;
+                      map.getUiSettings().setCompassEnabled(true);
+                      map.getUiSettings().setZoomGesturesEnabled(true);
+                      map.getUiSettings().setScrollGesturesEnabled(true);
+                      map.getUiSettings().setRotateGesturesEnabled(false);
+                      map.getUiSettings().setTiltGesturesEnabled(false);
+                      map.setStyle(new Style.Builder().fromJson(STYLE_JSON), style -> loadSavedRoute(true));
+                  });
+              }
+
+              private Button compactButton(String label) {
+                  Button button = new Button(this);
+                  button.setText(label);
+                  styleButton(button, Color.WHITE, Color.rgb(17, 24, 39));
+                  return button;
               }
 
               private Button modeButton(String label, String mode) {
@@ -747,132 +578,75 @@ jobs:
                   button.setOnClickListener(v -> {
                       TrackingState.setManualMode(this, mode);
                       refreshModeButtons();
-                      updateMapMarkerMode(mode);
+                      updateMarkerMode();
                       showToast("Pasirinktas režimas: " + readableMode(mode));
                   });
                   return button;
               }
 
-              private void setupMap() {
-                  WebSettings settings = webView.getSettings();
-                  settings.setJavaScriptEnabled(true);
-                  settings.setDomStorageEnabled(true);
-                  settings.setLoadWithOverviewMode(true);
-                  settings.setUseWideViewPort(true);
-                  settings.setMixedContentMode(WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
-                  webView.setOverScrollMode(WebView.OVER_SCROLL_NEVER);
-                  webView.setHorizontalScrollBarEnabled(false);
-                  webView.setVerticalScrollBarEnabled(false);
-                  scaleDetector = new ScaleGestureDetector(this, new ScaleGestureDetector.SimpleOnScaleGestureListener() {
-                      private float accumulatedScale = 1f;
-
-                      @Override
-                      public boolean onScaleBegin(ScaleGestureDetector detector) {
-                          scaling = true;
-                          accumulatedScale = 1f;
-                          return true;
-                      }
-
-                      @Override
-                      public boolean onScale(ScaleGestureDetector detector) {
-                          accumulatedScale *= detector.getScaleFactor();
-                          long now = System.currentTimeMillis();
-                          if (now - lastZoomAt < 350L) {
-                              return true;
-                          }
-                          if (accumulatedScale > 1.75f) {
-                              zoomMap(1);
-                              lastZoomAt = now;
-                              accumulatedScale = 1f;
-                          } else if (accumulatedScale < 0.57f) {
-                              zoomMap(-1);
-                              lastZoomAt = now;
-                              accumulatedScale = 1f;
-                          }
-                          return true;
-                      }
-
-                      @Override
-                      public void onScaleEnd(ScaleGestureDetector detector) {
-                          scaling = false;
-                          accumulatedScale = 1f;
-                      }
-                  });
-                  webView.setOnTouchListener((view, event) -> {
-                      view.getParent().requestDisallowInterceptTouchEvent(true);
-                      if (isZoomButtonTouch(event)) {
-                          return false;
-                      }
-                      scaleDetector.onTouchEvent(event);
-                      if (event.getPointerCount() > 1 || scaling) {
-                          return true;
-                      }
-                      switch (event.getActionMasked()) {
-                          case MotionEvent.ACTION_DOWN:
-                              lastTouchX = event.getX();
-                              lastTouchY = event.getY();
-                              return true;
-                          case MotionEvent.ACTION_MOVE:
-                              float dx = event.getX() - lastTouchX;
-                              float dy = event.getY() - lastTouchY;
-                              if (Math.abs(dx) > 3f || Math.abs(dy) > 3f) {
-                                  panMap(dx * 0.45f, dy * 0.45f);
-                                  lastTouchX = event.getX();
-                                  lastTouchY = event.getY();
-                              }
-                              return true;
-                          case MotionEvent.ACTION_UP:
-                          case MotionEvent.ACTION_CANCEL:
-                              return true;
-                          default:
-                              return false;
-                      }
-                  });
-                  webView.setWebViewClient(new WebViewClient() {
-                      @Override
-                      public void onPageFinished(WebView view, String url) {
-                          mapReady = true;
-                          loadSavedRoute();
-                      }
-                  });
-                  webView.loadUrl("file:///android_asset/map.html");
-              }
-
-              private void loadSavedRoute() {
-                  JSONArray route = routeStore.readAllJson();
-                  webView.evaluateJavascript("window.setLocations(" + route + ")", null);
-                  Cursor cursor = routeStore.latestCursor();
-                  try {
-                      if (cursor.moveToFirst()) {
-                          // The saved route is shown on the map; no permanent status text is shown above controls.
-                      }
-                  } finally {
-                      cursor.close();
+              private void loadSavedRoute(boolean fit) {
+                  if (map == null) return;
+                  for (Polyline line : routeLines) {
+                      map.removePolyline(line);
+                  }
+                  routeLines.clear();
+                  if (marker != null) {
+                      map.removeMarker(marker);
+                      marker = null;
+                  }
+                  lastUiPoint = null;
+                  for (RouteStore.Point point : routeStore.readAll()) {
+                      addPointToMap(point, false, false);
+                  }
+                  if (fit) {
+                      fitRoute();
                   }
               }
 
-              private void requestNeededPermissions() {
-                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                      requestPermissions(new String[] {
-                              Manifest.permission.ACCESS_FINE_LOCATION,
-                              Manifest.permission.ACCESS_COARSE_LOCATION,
-                              Manifest.permission.POST_NOTIFICATIONS
-                      }, REQUEST_PERMISSIONS);
-                  } else {
-                      requestPermissions(new String[] {
-                              Manifest.permission.ACCESS_FINE_LOCATION,
-                              Manifest.permission.ACCESS_COARSE_LOCATION
-                      }, REQUEST_PERMISSIONS);
+              private void addPointToMap(RouteStore.Point point, boolean moveCamera, boolean showMarker) {
+                  if (map == null || point == null) return;
+                  if (lastUiPoint != null) {
+                      PolylineOptions options = new PolylineOptions()
+                              .add(new LatLng(lastUiPoint.lat, lastUiPoint.lng))
+                              .add(new LatLng(point.lat, point.lng))
+                              .color(colorForMode(point.mode))
+                              .width(5f);
+                      routeLines.add(map.addPolyline(options));
+                  }
+                  lastUiPoint = point;
+                  if (marker != null) {
+                      map.removeMarker(marker);
+                  }
+                  marker = map.addMarker(new MarkerOptions()
+                          .position(new LatLng(point.lat, point.lng))
+                          .icon(iconForMode(TrackingState.getManualMode(this))));
+                  if (moveCamera || showMarker) {
+                      map.animateCamera(CameraUpdateFactory.newLatLngZoom(new LatLng(point.lat, point.lng), Math.max(map.getCameraPosition().zoom, 15.0)));
                   }
               }
 
-              private void showGpsWaiting() {
-                  webView.evaluateJavascript("document.getElementById('empty').textContent='Ieškoma GPS vietos...';", null);
+              private void centerOnLast() {
+                  if (map == null || lastUiPoint == null) {
+                      showToast("Dar nėra GPS vietos.");
+                      return;
+                  }
+                  map.animateCamera(CameraUpdateFactory.newLatLngZoom(new LatLng(lastUiPoint.lat, lastUiPoint.lng), 16.0));
               }
 
-              private boolean hasLocationPermission() {
-                  return checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
-                          || checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED;
+              private void fitRoute() {
+                  if (map == null) return;
+                  List<RouteStore.Point> points = routeStore.readAll();
+                  if (points.isEmpty()) return;
+                  if (points.size() == 1) {
+                      RouteStore.Point point = points.get(0);
+                      map.animateCamera(CameraUpdateFactory.newLatLngZoom(new LatLng(point.lat, point.lng), 16.0));
+                      return;
+                  }
+                  LatLngBounds.Builder builder = new LatLngBounds.Builder();
+                  for (RouteStore.Point point : points) {
+                      builder.include(new LatLng(point.lat, point.lng));
+                  }
+                  map.animateCamera(CameraUpdateFactory.newLatLngBounds(builder.build(), dp(70)));
               }
 
               private void startTracking() {
@@ -884,8 +658,7 @@ jobs:
                       } else {
                           startService(intent);
                       }
-                      showToast("Sekimas įjungtas. Maršrutas saugomas.");
-                      showGpsWaiting();
+                      showToast("Sekimas įjungtas.");
                   } catch (Exception error) {
                       TrackingState.setRunning(this, false);
                       showToast("Nepavyko paleisti sekimo: " + error.getClass().getSimpleName());
@@ -896,12 +669,13 @@ jobs:
               private void stopTracking() {
                   TrackingState.setRunning(this, false);
                   stopService(new Intent(this, LocationService.class));
-                  showToast("Sekimas sustabdytas. Išsaugotas maršrutas lieka žemėlapyje.");
+                  showToast("Sekimas sustabdytas.");
                   refreshButton();
               }
 
               private void refreshButton() {
                   boolean running = TrackingState.isRunning(this);
+                  if (trackingButton == null) return;
                   trackingButton.setText(running ? "Stabdyti sekimą" : "Pradėti sekimą");
                   styleButton(trackingButton, running ? Color.rgb(220, 38, 38) : Color.rgb(22, 163, 74), Color.WHITE);
               }
@@ -930,53 +704,47 @@ jobs:
                   button.setTextColor(textColor);
                   button.setTypeface(Typeface.DEFAULT_BOLD);
                   button.setAllCaps(false);
-                  button.setPadding(dp(10), dp(8), dp(10), dp(8));
+                  button.setPadding(dp(8), dp(7), dp(8), dp(7));
               }
 
-              private int dp(int value) {
-                  return (int) (value * getResources().getDisplayMetrics().density + 0.5f);
+              private void updateMarkerMode() {
+                  if (map == null || marker == null || lastUiPoint == null) return;
+                  map.removeMarker(marker);
+                  marker = map.addMarker(new MarkerOptions()
+                          .position(new LatLng(lastUiPoint.lat, lastUiPoint.lng))
+                          .icon(iconForMode(TrackingState.getManualMode(this))));
               }
 
-              private void updateMapMarkerMode(String mode) {
-                  if (mapReady) {
-                      String safeMode = mode == null ? MovementMode.GROUND : mode;
-                      webView.evaluateJavascript("window.setCurrentMode('" + safeMode + "')", null);
+              private Icon iconForMode(String mode) {
+                  String label = "🌐";
+                  int fill = Color.WHITE;
+                  if (MovementMode.AIR.equals(mode)) {
+                      label = "✈";
+                      fill = Color.rgb(250, 204, 21);
+                  } else if (MovementMode.SEA.equals(mode)) {
+                      label = "⛵";
+                      fill = Color.rgb(37, 99, 235);
                   }
+                  Bitmap bitmap = Bitmap.createBitmap(dp(42), dp(42), Bitmap.Config.ARGB_8888);
+                  Canvas canvas = new Canvas(bitmap);
+                  Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+                  paint.setColor(fill);
+                  canvas.drawCircle(dp(21), dp(21), dp(18), paint);
+                  paint.setStyle(Paint.Style.STROKE);
+                  paint.setStrokeWidth(dp(2));
+                  paint.setColor(Color.rgb(17, 24, 39));
+                  canvas.drawCircle(dp(21), dp(21), dp(18), paint);
+                  paint.setStyle(Paint.Style.FILL);
+                  paint.setTextAlign(Paint.Align.CENTER);
+                  paint.setTextSize(dp(20));
+                  canvas.drawText(label, dp(21), dp(28), paint);
+                  return IconFactory.getInstance(this).fromBitmap(bitmap);
               }
 
-              private void panMap(float dx, float dy) {
-                  if (mapReady) {
-                      webView.evaluateJavascript(String.format(Locale.US, "window.panBy(%f,%f)", dx, dy), null);
-                  }
-              }
-
-              private void zoomMap(int delta) {
-                  if (mapReady) {
-                      webView.evaluateJavascript("window.zoomBy(" + delta + ")", null);
-                  }
-              }
-
-              private boolean isZoomButtonTouch(MotionEvent event) {
-                  float density = getResources().getDisplayMetrics().density;
-                  float x = event.getX();
-                  float y = event.getY();
-                  float left = 12f * density;
-                  float right = 56f * density;
-                  float topPlus = 12f * density;
-                  float bottomPlus = 56f * density;
-                  float topMinus = 62f * density;
-                  float bottomMinus = 106f * density;
-                  return x >= left && x <= right
-                          && ((y >= topPlus && y <= bottomPlus) || (y >= topMinus && y <= bottomMinus));
-              }
-
-              private void showLocation(double lat, double lng, float accuracy, String mode) {
-                  if (mapReady) {
-                      String js = String.format(Locale.US,
-                              "window.addLocation(%f,%f,%f,'%s')",
-                              lat, lng, accuracy, mode == null ? MovementMode.GROUND : mode);
-                      webView.evaluateJavascript(js, null);
-                  }
+              private int colorForMode(String mode) {
+                  if (MovementMode.AIR.equals(mode)) return Color.rgb(250, 204, 21);
+                  if (MovementMode.SEA.equals(mode)) return Color.rgb(37, 99, 235);
+                  return Color.rgb(22, 163, 74);
               }
 
               private void showStatistics() {
@@ -993,8 +761,32 @@ jobs:
                   return "žeme";
               }
 
+              private void requestNeededPermissions() {
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                      requestPermissions(new String[]{
+                              Manifest.permission.ACCESS_FINE_LOCATION,
+                              Manifest.permission.ACCESS_COARSE_LOCATION,
+                              Manifest.permission.POST_NOTIFICATIONS
+                      }, REQUEST_PERMISSIONS);
+                  } else {
+                      requestPermissions(new String[]{
+                              Manifest.permission.ACCESS_FINE_LOCATION,
+                              Manifest.permission.ACCESS_COARSE_LOCATION
+                      }, REQUEST_PERMISSIONS);
+                  }
+              }
+
+              private boolean hasLocationPermission() {
+                  return checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+                          || checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED;
+              }
+
               private void showToast(String message) {
-                  android.widget.Toast.makeText(this, message, android.widget.Toast.LENGTH_SHORT).show();
+                  Toast.makeText(this, message, Toast.LENGTH_SHORT).show();
+              }
+
+              private int dp(int value) {
+                  return (int) (value * getResources().getDisplayMetrics().density + 0.5f);
               }
           }
           EOF
@@ -1064,7 +856,10 @@ jobs:
                   super.onDestroy();
               }
 
-              @Override public IBinder onBind(Intent intent) { return null; }
+              @Override
+              public IBinder onBind(Intent intent) {
+                  return null;
+              }
 
               @Override
               public void onLocationChanged(Location location) {
@@ -1081,7 +876,7 @@ jobs:
                               location.getLatitude(),
                               location.getLongitude(),
                               location.hasAccuracy() ? location.getAccuracy() : 0f,
-                              location.getTime() > 0 ? location.getTime() : System.currentTimeMillis(),
+                              effectiveTime(location),
                               location.getProvider(),
                               mode
                       );
@@ -1110,7 +905,6 @@ jobs:
                       locationManager.removeUpdates(this);
                       request(LocationManager.GPS_PROVIDER);
                       request(LocationManager.NETWORK_PROVIDER);
-                      broadcastStatus();
                   } catch (SecurityException error) {
                       stopSelf();
                   }
@@ -1127,63 +921,39 @@ jobs:
                   }
               }
 
-              private void broadcastStatus() {
-                  Intent intent = new Intent(ACTION_LOCATION);
-                  intent.setPackage(getPackageName());
-                  intent.putExtra(EXTRA_LAT, Double.NaN);
-                  intent.putExtra(EXTRA_LNG, Double.NaN);
-                  intent.putExtra(EXTRA_ACCURACY, 0f);
-                  intent.putExtra(EXTRA_MODE, TrackingState.getManualMode(this));
-                  sendBroadcast(intent);
-              }
-
               private boolean shouldAccept(Location location) {
                   if (location == null) return false;
                   if (location.hasAccuracy() && location.getAccuracy() > MAX_ACCURACY_METERS) return false;
                   if (lastAccepted == null) return true;
-
                   long dtMs = Math.max(1L, effectiveTime(location) - effectiveTime(lastAccepted));
                   float distance = location.distanceTo(lastAccepted);
                   float accuracy = location.hasAccuracy() ? location.getAccuracy() : GOOD_ACCURACY_METERS;
                   float previousAccuracy = lastAccepted.hasAccuracy() ? lastAccepted.getAccuracy() : GOOD_ACCURACY_METERS;
                   float noiseRadius = Math.max(MIN_DISTANCE_METERS, Math.max(accuracy, previousAccuracy) * 3.0f);
-                  if (distance < noiseRadius && dtMs < 300000L) {
-                      return false;
-                  }
-                  if (accuracy > GOOD_ACCURACY_METERS && distance < accuracy * 4.0f && dtMs < 600000L) {
-                      return false;
-                  }
-
+                  if (distance < noiseRadius && dtMs < 300000L) return false;
+                  if (accuracy > GOOD_ACCURACY_METERS && distance < accuracy * 4.0f && dtMs < 600000L) return false;
                   float speed = distance / (dtMs / 1000f);
                   boolean deviceReportsAirSpeed = location.hasSpeed() && location.getSpeed() > 55f;
                   String manualMode = TrackingState.getManualMode(this);
-                  if (!MovementMode.AIR.equals(manualMode) && speed > 18f && dtMs < 180000L) {
-                      return false;
-                  }
-                  if (speed > GLITCH_SPEED_MPS && !deviceReportsAirSpeed) {
-                      return false;
-                  }
+                  if (!MovementMode.AIR.equals(manualMode) && speed > 18f && dtMs < 180000L) return false;
+                  if (speed > GLITCH_SPEED_MPS && !deviceReportsAirSpeed) return false;
                   return true;
               }
 
               private String classify(Location location) {
                   String manualMode = TrackingState.getManualMode(this);
-                  if (MovementMode.AIR.equals(manualMode) || MovementMode.SEA.equals(manualMode)) {
-                      return manualMode;
-                  }
+                  if (MovementMode.AIR.equals(manualMode) || MovementMode.SEA.equals(manualMode)) return manualMode;
                   if (lastAccepted == null) return MovementMode.GROUND;
                   long dtMs = Math.max(1L, effectiveTime(location) - effectiveTime(lastAccepted));
                   float distance = location.distanceTo(lastAccepted);
                   float calculatedSpeed = distance / (dtMs / 1000f);
                   float speed = location.hasSpeed() ? Math.max(location.getSpeed(), calculatedSpeed) : calculatedSpeed;
-
                   if ((speed > 55f && distance > 1200f && dtMs > 12000L) || (location.hasSpeed() && location.getSpeed() > 70f)) {
                       highSpeedStreak++;
                   } else {
                       highSpeedStreak = 0;
                   }
                   if (highSpeedStreak >= 2) return MovementMode.AIR;
-
                   if (speed >= 1.5f && speed <= 13f && distance > 40f && dtMs > 8000L && !LocationManager.GPS_PROVIDER.equals(location.getProvider())) {
                       return MovementMode.SEA;
                   }
@@ -1191,9 +961,7 @@ jobs:
               }
 
               private boolean isFlightGap(Location location, String manualMode) {
-                  if (!MovementMode.AIR.equals(manualMode) || lastAccepted == null || location == null) {
-                      return false;
-                  }
+                  if (!MovementMode.AIR.equals(manualMode) || lastAccepted == null || location == null) return false;
                   long dtMs = Math.max(1L, effectiveTime(location) - effectiveTime(lastAccepted));
                   float distance = location.distanceTo(lastAccepted);
                   return dtMs >= FLIGHT_GAP_TIME_MS && distance >= FLIGHT_GAP_DISTANCE_METERS;
@@ -1249,7 +1017,7 @@ jobs:
                           : new Notification.Builder(this);
                   return builder
                           .setContentTitle("Tracker veikia")
-                          .setContentText("Programa nuolat saugo marsruta.")
+                          .setContentText("Programa nuolat saugo maršrutą.")
                           .setSmallIcon(android.R.drawable.ic_menu_mylocation)
                           .setContentIntent(pendingIntent)
                           .setOngoing(true)
@@ -1258,11 +1026,7 @@ jobs:
 
               private void createChannel() {
                   if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                      NotificationChannel channel = new NotificationChannel(
-                              CHANNEL_ID,
-                              "Tracker",
-                              NotificationManager.IMPORTANCE_LOW
-                      );
+                      NotificationChannel channel = new NotificationChannel(CHANNEL_ID, "Tracker", NotificationManager.IMPORTANCE_LOW);
                       NotificationManager manager = getSystemService(NotificationManager.class);
                       if (manager != null) manager.createNotificationChannel(channel);
                   }
